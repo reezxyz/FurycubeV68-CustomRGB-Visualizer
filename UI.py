@@ -45,6 +45,7 @@ CHUNK = 1024
 FFT_N = 4096
 FPS = 30
 CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "furycube_config.json")
+PRESETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "presets")
 
 # ---------------------------------------------------------------- palet
 PALETTES = {
@@ -354,6 +355,366 @@ def fx_pulse(ctx, st):
     return ctx.pal(np.clip(0.1 + dist * 0.9, 0, 1)) * inten[..., None]
 
 
+# ---------------------------------------------------------------- visualizer tambahan
+def fx_wave(ctx, st):
+    """Gelombang horizontal yang mengikuti level tiap band."""
+    st["ph"] = st.get("ph", 0.0) + ctx.dt * (1.5 + ctx.vol * 5.0)
+    out = np.zeros((COLS, ROWS, 3))
+    for c in range(COLS):
+        amp = 0.35 + ctx.bands[c] * 2.8
+        center = 2.5 + np.sin(c * 0.65 + st["ph"]) * amp
+        for r in range(ROWS):
+            d = abs(r - center)
+            glow = np.exp(-d * 1.55) * (0.25 + 0.75 * ctx.bands[c])
+            out[c, r] = ctx.pal((c / max(1, COLS - 1) + st["ph"] * 0.035) % 1.0) * glow
+    return out
+
+
+def fx_burst(ctx, st):
+    """Ledakan dari pusat saat bass/beat naik."""
+    pulse = st.get("pulse", 0.0) * np.exp(-ctx.dt * 4.5)
+    if ctx.beat:
+        pulse = 1.0
+    st["pulse"] = pulse
+
+    dist = np.hypot(CC - 7, (RR - 2.5) * 1.25)
+    radius = 0.7 + pulse * 7.0 + ctx.bass * 2.5
+    ring = np.exp(-((dist - radius) ** 2) / 1.5)
+    core = np.exp(-(dist ** 2) / 8.0) * (0.15 + pulse * 0.8)
+    return ctx.pal(np.clip(dist / 8.0 + ctx.pal.t * 0.04, 0, 1)) * (
+        ring + core
+    )[..., None]
+
+
+def fx_matrix(ctx, st):
+    """Hujan pixel vertikal dengan intensitas audio."""
+    drops = st.setdefault("drops", np.random.uniform(-ROWS, 0, COLS))
+    speeds = st.setdefault("speeds", np.random.uniform(2.0, 5.5, COLS))
+    out = np.zeros((COLS, ROWS, 3))
+
+    drops += speeds * (0.35 + ctx.bands * 1.4) * ctx.dt
+    drops[drops > ROWS + 2] = np.random.uniform(-5, -1, np.count_nonzero(drops > ROWS + 2))
+
+    for c in range(COLS):
+        head = drops[c]
+        strength = 0.25 + ctx.bands[c] * 0.9
+        for tail in range(4):
+            r = int(head) - tail
+            if 0 <= r < ROWS:
+                fade = (1.0 - tail / 4.5) * strength
+                out[c, r] = ctx.pal(c / max(1, COLS - 1)) * fade
+
+    return out
+
+
+def fx_vortex(ctx, st):
+    """Spiral/vortex kecil yang berputar dan diperkuat bass."""
+    st["ph"] = st.get("ph", 0.0) + ctx.dt * (1.2 + ctx.bass * 4.0)
+    ph = st["ph"]
+
+    dx = CC - 7
+    dy = (RR - 2.5) * 1.35
+    radius = np.hypot(dx, dy)
+    angle = np.arctan2(dy, dx)
+    spiral = np.sin(angle * 3.0 + radius * 1.8 - ph * 3.0) * 0.5 + 0.5
+    mask = np.exp(-radius * 0.22)
+    audio = 0.2 + 0.8 * np.clip(ctx.bands[:, None] + ctx.bass * 0.35, 0, 1)
+    return ctx.pal((spiral + ph * 0.025) % 1.0) * (spiral * mask * audio)[..., None]
+
+
+def fx_heartbeat(ctx, st):
+    """Pulse seperti detak jantung, sinkron dengan beat/bass."""
+    phase = st.get("phase", 0.0)
+    if ctx.beat:
+        phase = 1.0
+    phase = max(0.0, phase - ctx.dt * (2.8 + ctx.vol * 4.0))
+    st["phase"] = phase
+
+    # Dua puncak kecil membuat pulse terasa seperti lub-dub.
+    t = max(0.0, min(1.0, phase))
+    pulse = max(np.exp(-((t - 0.72) / 0.11) ** 2),
+                0.72 * np.exp(-((t - 0.48) / 0.08) ** 2))
+    pulse *= 0.35 + ctx.bass * 0.65
+
+    dist = np.hypot(CC - 7, (RR - 2.5) * 1.35)
+    glow = np.exp(-dist * 0.30)
+    return ctx.pal(np.clip(dist / 8.0, 0, 1)) * (pulse * glow)[..., None]
+
+
+
+
+# ---------------------------------------------------------------- visualizer batch 2
+def fx_plasma(ctx, st):
+    """Plasma cair multi-gelombang, intensitas mengikuti audio."""
+    st["ph"] = st.get("ph", 0.0) + ctx.dt * (0.8 + ctx.vol * 3.0)
+    ph = st["ph"]
+    v = (
+        np.sin(CC * 0.72 + ph)
+        + np.sin(RR * 1.05 - ph * 0.8)
+        + np.sin((CC + RR) * 0.48 + ph * 0.55)
+        + np.sin(np.hypot(CC - 7, RR - 2.5) * 0.85 - ph * 1.2)
+    ) / 4.0
+    v = v * 0.5 + 0.5
+    audio = 0.18 + 0.82 * np.clip(
+        ctx.bands[:, None] * 1.15 + ctx.bass * 0.35, 0, 1
+    )
+    return ctx.pal((v + ph * 0.025) % 1.0) * (v * audio)[..., None]
+
+
+def fx_galaxy(ctx, st):
+    """Bintang/pixel yang berkedip dan bergerak perlahan."""
+    stars = st.get("stars")
+    if stars is None:
+        rng = np.random.default_rng(42)
+        stars = np.column_stack([
+            rng.uniform(0, COLS - 1, 24),
+            rng.uniform(0, ROWS - 1, 24),
+            rng.uniform(0.5, 1.8, 24),
+            rng.uniform(0, 1, 24),
+        ])
+        st["stars"] = stars
+
+    out = np.zeros((COLS, ROWS, 3))
+    stars[:, 0] += np.sin(stars[:, 3] * 7 + st.get("ph", 0)) * ctx.dt * 0.25
+    stars[:, 1] += np.cos(stars[:, 3] * 5 + st.get("ph", 0)) * ctx.dt * 0.18
+    stars[:, 0] %= COLS
+    stars[:, 1] %= ROWS
+    st["ph"] = st.get("ph", 0.0) + ctx.dt * (0.5 + ctx.bass * 2.0)
+
+    for x, y, speed, hue in stars:
+        c = int(round(x))
+        r = int(round(y))
+        if 0 <= c < COLS and 0 <= r < ROWS:
+            twinkle = 0.35 + 0.65 * (
+                0.5 + 0.5 * np.sin(st["ph"] * speed * 2.5 + hue * 12)
+            )
+            intensity = twinkle * (0.25 + 0.9 * ctx.vol)
+            out[c, r] = np.maximum(
+                out[c, r],
+                ctx.pal((hue + st["ph"] * 0.02) % 1.0) * intensity
+            )
+
+    # Bass creates a subtle galactic core.
+    dist = np.hypot(CC - 7, (RR - 2.5) * 1.35)
+    core = np.exp(-dist * 0.65) * ctx.bass * 0.5
+    out += ctx.pal(0.55 + st["ph"] * 0.015) * core[..., None]
+    return np.clip(out, 0, 1)
+
+
+def fx_lightning(ctx, st):
+    """Kilat bercabang ketika beat terdeteksi."""
+    flash = st.get("flash", 0.0) * np.exp(-ctx.dt * 8.0)
+    if ctx.beat:
+        flash = 1.0
+        st["bolt"] = np.random.default_rng().integers(0, ROWS, COLS)
+    st["flash"] = flash
+
+    bolt = st.get("bolt")
+    out = np.zeros((COLS, ROWS, 3))
+    if bolt is not None:
+        for c in range(COLS):
+            center = int(bolt[c])
+            for r in range(ROWS):
+                d = abs(r - center)
+                if d <= 1:
+                    out[c, r] = ctx.pal(
+                        (c / max(1, COLS - 1) + st.get("flash", 0) * 0.08) % 1
+                    ) * flash * (1.0 if d == 0 else 0.35)
+
+    # Ambient electric field.
+    out += ctx.pal(0.6) * (ctx.vol * 0.08)
+    return np.clip(out, 0, 1)
+
+
+def fx_comet(ctx, st):
+    """Komet bergerak dengan trail, kecepatannya mengikuti musik."""
+    pos = st.get("pos", -4.0)
+    pos += ctx.dt * (2.0 + ctx.vol * 8.0)
+    if pos > COLS + 4:
+        pos = -4.0
+    st["pos"] = pos
+
+    out = np.zeros((COLS, ROWS, 3))
+    center = 2.5 + np.sin(st.get("ph", 0.0)) * (0.8 + ctx.bass * 1.4)
+    st["ph"] = st.get("ph", 0.0) + ctx.dt * 1.2
+
+    for c in range(COLS):
+        d = abs(c - pos)
+        trail = np.exp(-d * 0.75)
+        if trail < 0.02:
+            continue
+        for r in range(ROWS):
+            dy = abs(r - center)
+            glow = np.exp(-dy * 1.4) * trail
+            out[c, r] = ctx.pal((c / max(1, COLS - 1) + st["ph"] * 0.04) % 1) * glow
+
+    return out * (0.35 + 0.65 * ctx.vol)
+
+
+def fx_dna(ctx, st):
+    """Dua heliks pixel yang bergerak dan berinteraksi dengan audio."""
+    st["ph"] = st.get("ph", 0.0) + ctx.dt * (1.4 + ctx.bass * 3.5)
+    ph = st["ph"]
+    out = np.zeros((COLS, ROWS, 3))
+
+    for c in range(COLS):
+        t = c / max(1, COLS - 1)
+        y1 = 2.5 + np.sin(t * np.pi * 3.0 + ph) * (1.5 + ctx.bands[c] * 1.0)
+        y2 = 5.0 - y1
+        for y, hue in ((y1, 0.05), (y2, 0.55)):
+            r = int(round(y))
+            if 0 <= r < ROWS:
+                out[c, r] = ctx.pal((hue + t + ph * 0.025) % 1) * (
+                    0.35 + ctx.bands[c] * 0.65
+                )
+
+        # Connecting rung.
+        a, b = sorted((int(round(y1)), int(round(y2))))
+        for r in range(max(0, a), min(ROWS, b + 1)):
+            out[c, r] = np.maximum(
+                out[c, r],
+                ctx.pal((t + ph * 0.02) % 1) * 0.18
+            )
+    return out
+
+
+def fx_orbital(ctx, st):
+    """Partikel mengorbit pusat dengan radius reaktif."""
+    st["ph"] = st.get("ph", 0.0) + ctx.dt * (1.0 + ctx.vol * 4.0)
+    ph = st["ph"]
+    out = np.zeros((COLS, ROWS, 3))
+
+    center_x, center_y = 7.0, 2.5
+    for i in range(4):
+        angle = ph * (1.0 + i * 0.22) + i * np.pi / 2
+        rx = 2.0 + i * 0.75 + ctx.bass * 1.5
+        ry = 0.7 + i * 0.35 + ctx.bass * 0.5
+        x = center_x + np.cos(angle) * rx
+        y = center_y + np.sin(angle) * ry
+
+        dist = np.hypot(CC - x, (RR - y) * 1.2)
+        glow = np.exp(-dist * 1.7) * (0.35 + ctx.vol * 0.8)
+        out += ctx.pal((i / 4 + ph * 0.035) % 1) * glow[..., None]
+
+    core = np.exp(-np.hypot(CC - center_x, (RR - center_y) * 1.2) * 1.4)
+    out += ctx.pal(0.15 + ph * 0.03) * core[..., None] * ctx.bass * 0.55
+    return np.clip(out, 0, 1)
+
+
+def fx_mirror(ctx, st):
+    """Spectrum mirror: energi tumbuh dari sumbu tengah."""
+    out = np.zeros((COLS, ROWS, 3))
+    half = ROWS / 2.0
+
+    for c in range(COLS):
+        level = float(ctx.bands[c])
+        height = level * half
+        for r in range(ROWS):
+            d = abs((r + 0.5) - half)
+            if d <= height:
+                edge = 1.0 - max(0.0, d / max(height, 0.01))
+                out[c, r] = ctx.pal(d / max(1.0, half)) * edge
+
+    return out
+
+
+def fx_explosion(ctx, st):
+    """Pixel explosion dari pusat ketika beat."""
+    particles = st.setdefault("particles", [])
+
+    if ctx.beat:
+        rng = np.random.default_rng()
+        for _ in range(14):
+            angle = rng.uniform(0, np.pi * 2)
+            speed = rng.uniform(2.5, 7.0)
+            particles.append([
+                7.0, 2.5,
+                np.cos(angle) * speed,
+                np.sin(angle) * speed,
+                rng.uniform(0, 1),
+                0.0,
+            ])
+
+    out = np.zeros((COLS, ROWS, 3))
+    keep = []
+    for p in particles:
+        p[0] += p[2] * ctx.dt
+        p[1] += p[3] * ctx.dt
+        p[5] += ctx.dt
+        if p[5] < 1.5 and -1 <= p[0] < COLS + 1 and -1 <= p[1] < ROWS + 1:
+            keep.append(p)
+            c = int(round(p[0]))
+            r = int(round(p[1]))
+            if 0 <= c < COLS and 0 <= r < ROWS:
+                fade = max(0.0, 1.0 - p[5] / 1.5)
+                out[c, r] = ctx.pal(
+                    (p[4] + p[5] * 0.15) % 1.0
+                ) * fade
+
+    st["particles"] = keep
+    # Keep a faint center pulse between beats.
+    core = np.exp(-np.hypot(CC - 7, (RR - 2.5) * 1.2) * 1.7)
+    out += ctx.pal(0.0) * core[..., None] * ctx.bass * 0.22
+    return np.clip(out, 0, 1)
+
+
+def fx_soundwave(ctx, st):
+    """Gelombang sinus horizontal yang dipengaruhi band audio."""
+    st["ph"] = st.get("ph", 0.0) + ctx.dt * (1.5 + ctx.vol * 5.0)
+    ph = st["ph"]
+    out = np.zeros((COLS, ROWS, 3))
+
+    for c in range(COLS):
+        amp = 0.45 + ctx.bands[c] * 1.6
+        center = 2.5 + np.sin(c * 0.8 + ph) * amp
+        for r in range(ROWS):
+            d = abs(r - center)
+            glow = np.exp(-d * 2.2)
+            out[c, r] = ctx.pal(
+                (c / max(1, COLS - 1) + ph * 0.03) % 1
+            ) * glow * (0.2 + ctx.bands[c] * 0.9)
+
+    return out
+
+
+def fx_tunnel(ctx, st):
+    """Energy tunnel: cincin konsentris menuju titik pusat."""
+    st["ph"] = st.get("ph", 0.0) + ctx.dt * (1.0 + ctx.vol * 3.5)
+    ph = st["ph"]
+
+    dist = np.hypot(CC - 7, (RR - 2.5) * 1.35)
+    rings = np.sin(dist * 3.0 - ph * 5.0) * 0.5 + 0.5
+    depth = np.exp(-dist * 0.22)
+    audio = 0.18 + 0.82 * np.clip(
+        ctx.bass * 0.65 + ctx.bands[:, None] * 0.7, 0, 1
+    )
+
+    return ctx.pal((rings + ph * 0.025) % 1.0) * (
+        rings * depth * audio
+    )[..., None]
+
+
+NEW_MODES_BATCH_2 = [
+    ("Plasma", fx_plasma),
+    ("Galaxy", fx_galaxy),
+    ("Lightning", fx_lightning),
+    ("Comet", fx_comet),
+    ("DNA", fx_dna),
+    ("Orbital", fx_orbital),
+    ("Spectrum Mirror", fx_mirror),
+    ("Pixel Explosion", fx_explosion),
+    ("Soundwave", fx_soundwave),
+    ("Energy Tunnel", fx_tunnel),
+]
+
+NEW_MODES = [
+    ("Spectrum Wave", fx_wave),
+    ("Center Burst", fx_burst),
+    ("Matrix Rain", fx_matrix),
+    ("Vortex", fx_vortex),
+    ("Heartbeat", fx_heartbeat),
+]
+
 MODES = [
     ("Spektrum Klasik", fx_bars),
     ("Peak Hold", fx_peak),
@@ -364,7 +725,7 @@ MODES = [
     ("Hujan Neon", fx_rain),
     ("Aurora", fx_aurora),
     ("Denyut Tengah", fx_pulse),
-]
+] + NEW_MODES + NEW_MODES_BATCH_2
 MODE_FUNCS = dict(MODES)
 TEST_ALL = "[TES] Semua LED putih"
 TEST_SWEEP = "[TES] Sapu satu per satu"
@@ -411,6 +772,49 @@ class Settings:
                 json.dump(d, f, indent=1)
         except Exception:
             pass
+
+    def snapshot(self):
+        d = {k: getattr(self, k) for k in self.KEYS}
+        d["empty"] = sorted(self.empty)
+        return d
+
+    def apply(self, d):
+        for k in self.KEYS:
+            if k in d:
+                setattr(self, k, d[k])
+        self.c1, self.c2 = tuple(self.c1), tuple(self.c2)
+        self.empty = {tuple(x) for x in d.get("empty", [])}
+        if self.mode not in MODE_NAMES:
+            self.mode = MODE_NAMES[0]
+        if self.palette not in PALETTE_NAMES:
+            self.palette = PALETTE_NAMES[0]
+
+    def save_preset(self, name):
+        os.makedirs(PRESETS_DIR, exist_ok=True)
+        safe = re.sub(r"[^a-zA-Z0-9 _-]+", "", name).strip()
+        if not safe:
+            return False
+        path = os.path.join(PRESETS_DIR, safe + ".json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(self.snapshot(), f, indent=2)
+        return True
+
+    def load_preset(self, name):
+        path = os.path.join(PRESETS_DIR, name + ".json")
+        with open(path, "r", encoding="utf-8") as f:
+            self.apply(json.load(f))
+
+    @staticmethod
+    def preset_names():
+        try:
+            os.makedirs(PRESETS_DIR, exist_ok=True)
+            return sorted(
+                os.path.splitext(x)[0]
+                for x in os.listdir(PRESETS_DIR)
+                if x.lower().endswith(".json")
+            )
+        except Exception:
+            return []
 
 
 # ---------------------------------------------------------------- mesin (thread render + HID)
@@ -539,6 +943,7 @@ class Engine(threading.Thread):
             time.sleep(max(0.0, 1.0 / FPS - (time.time() - now)))
 
 
+
 # ---------------------------------------------------------------- GUI
 # UI v2: dashboard modern, visualizer library, audio monitor, dan LED preview.
 BG = "#0b0b10"
@@ -575,6 +980,8 @@ class App:
         self._style()
         self._build()
 
+        self.preview_glow = True
+        self.preview_zoom = 1.0
         self.on_palette()
         self.audio.start()
         self.eng.start()
@@ -720,24 +1127,125 @@ class App:
         card = self._card(parent)
         card.pack(fill="x", pady=(0, 9))
 
-        tk.Label(card, text="VISUALIZER", bg=SURFACE, fg=FG,
-                 font=("Segoe UI Semibold", 11)).pack(
-                     anchor="w", padx=16, pady=(14, 8))
+        header = tk.Frame(card, bg=SURFACE)
+        header.pack(fill="x", padx=16, pady=(14, 8))
 
-        row = tk.Frame(card, bg=SURFACE)
-        row.pack(fill="x", padx=16, pady=(0, 14))
+        tk.Label(header, text="VISUALIZER LIBRARY", bg=SURFACE, fg=FG,
+                 font=("Segoe UI Semibold", 11)).pack(side="left")
 
+        self.mode_count = tk.Label(
+            header, text=f"{len(MODES)} MODES", bg=SURFACE,
+            fg=MUTED, font=("Segoe UI", 8))
+        self.mode_count.pack(side="right")
+
+        # Scrollable card grid. Small enough for the current window, but
+        # scrollable so adding more visualizers won't destroy the layout.
+        wrap = tk.Frame(card, bg=SURFACE)
+        wrap.pack(fill="x", padx=12, pady=(0, 8))
+
+        self.viz_canvas = tk.Canvas(
+            wrap, height=170, bg=SURFACE, highlightthickness=0)
+        self.viz_scroll = ttk.Scrollbar(
+            wrap, orient="vertical", command=self.viz_canvas.yview)
+        self.viz_inner = tk.Frame(self.viz_canvas, bg=SURFACE)
+
+        self.viz_inner.bind(
+            "<Configure>",
+            lambda e: self.viz_canvas.configure(
+                scrollregion=self.viz_canvas.bbox("all")))
+        self.viz_canvas.create_window(
+            (0, 0), window=self.viz_inner, anchor="nw", width=390)
+        self.viz_canvas.configure(yscrollcommand=self.viz_scroll.set)
+
+        self.viz_canvas.pack(side="left", fill="both", expand=True)
+        self.viz_scroll.pack(side="right", fill="y")
+
+        self.mode_cards = {}
+        self._build_visualizer_cards()
+
+        # Keep the old selector as a compact accessibility/fallback control.
+        bottom = tk.Frame(card, bg=SURFACE)
+        bottom.pack(fill="x", padx=16, pady=(2, 13))
         self.mode_var = tk.StringVar(value=self.S.mode)
         self.mode_combo = ttk.Combobox(
-            row, textvariable=self.mode_var, values=MODE_NAMES,
+            bottom, textvariable=self.mode_var, values=MODE_NAMES,
             state="readonly")
-        self.mode_combo.pack(side="left", fill="x", expand=True)
+        self.mode_combo.pack(fill="x")
         self.mode_combo.bind("<<ComboboxSelected>>", self.on_mode)
 
-        # Compact "mode count" indicator makes the library feel intentional
-        tk.Label(card, text=f"{len(MODES)} reactive modes  •  2 test modes",
-                 bg=SURFACE, fg=MUTED, font=("Segoe UI", 8)).pack(
-                     anchor="w", padx=16, pady=(0, 13))
+    def _build_visualizer_cards(self):
+        for child in self.viz_inner.winfo_children():
+            child.destroy()
+
+        names = [n for n, _ in MODES]
+        for i, name in enumerate(names):
+            rr, cc = divmod(i, 2)
+            card = tk.Frame(
+                self.viz_inner, bg=SURFACE_2, highlightthickness=1,
+                highlightbackground=BORDER, cursor="hand2")
+            card.grid(row=rr, column=cc, padx=4, pady=4, sticky="ew")
+            self.viz_inner.columnconfigure(cc, weight=1)
+
+            thumb = tk.Canvas(card, width=72, height=42, bg="#0a0a0f",
+                              highlightthickness=0)
+            thumb.pack(side="left", padx=7, pady=7)
+            self._draw_viz_thumbnail(thumb, i)
+
+            info = tk.Frame(card, bg=SURFACE_2)
+            info.pack(side="left", fill="both", expand=True, padx=(0, 5))
+            tk.Label(info, text=name, bg=SURFACE_2, fg=FG,
+                     font=("Segoe UI Semibold", 8),
+                     anchor="w").pack(fill="x", pady=(8, 0))
+            reactive = "BEAT" if any(x in name.lower()
+                                     for x in ("beat", "burst", "heartbeat", "riak")) else "AUDIO"
+            tk.Label(info, text=reactive, bg=SURFACE_2, fg=MUTED,
+                     font=("Segoe UI", 7), anchor="w").pack(fill="x")
+
+            for widget in (card, thumb, info):
+                widget.bind("<Button-1>",
+                            lambda e, n=name: self._select_visualizer(n))
+
+            self.mode_cards[name] = card
+
+        self._highlight_visualizer(self.S.mode)
+
+    def _draw_viz_thumbnail(self, canvas, idx):
+        # Static mini-preview; actual LED preview remains live.
+        canvas.delete("all")
+        w, h = 72, 42
+        seed = [
+            [0.15, 0.35, 0.8, 0.55, 0.25],
+            [0.2, 0.55, 0.35, 0.75, 0.3],
+            [0.8, 0.45, 0.25, 0.45, 0.8],
+            [0.15, 0.75, 0.3, 0.9, 0.2],
+        ][idx % 4]
+        for i, v in enumerate(seed):
+            x = 6 + i * 15
+            hh = v * 28
+            canvas.create_rectangle(x, h - hh - 5, x + 8, h - 5,
+                                    fill=ACCENT if i % 2 else ACCENT_2,
+                                    outline="")
+        canvas.create_oval(30, 14, 42, 26, outline="#ffffff",
+                           width=1)
+
+    def _select_visualizer(self, name):
+        self.S.mode = name
+        self.mode_var.set(name)
+        self.S.save()
+        self._highlight_visualizer(name)
+
+    def _highlight_visualizer(self, name):
+        for n, card in self.mode_cards.items():
+            selected = n == name
+            card.config(
+                bg=ACCENT if selected else SURFACE_2,
+                highlightbackground=ACCENT_2 if selected else BORDER)
+            for child in card.winfo_children():
+                if isinstance(child, tk.Frame):
+                    child.config(bg=ACCENT if selected else SURFACE_2)
+                    for sub in child.winfo_children():
+                        if isinstance(sub, tk.Label):
+                            sub.config(bg=ACCENT if selected else SURFACE_2)
 
     def _build_palette_card(self, parent):
         card = self._card(parent)
@@ -813,13 +1321,47 @@ class App:
 
     def _build_actions(self, parent):
         row = tk.Frame(parent, bg=BG)
-        row.pack(fill="x", pady=(0, 0))
+        row.pack(fill="x", pady=(0, 5))
 
         ttk.Button(row, text="Reconnect", command=self.reconnect,
                    style="Accent.TButton").pack(side="left", fill="x",
                                                 expand=True, padx=(0, 4))
         ttk.Button(row, text="Clear ✕", command=self.clear_empty).pack(
             side="left", fill="x", expand=True, padx=(4, 0))
+
+        # Presets
+        preset = self._card(parent)
+        preset.pack(fill="x", pady=(4, 0))
+
+        head = tk.Frame(preset, bg=SURFACE)
+        head.pack(fill="x", padx=14, pady=(10, 6))
+        tk.Label(head, text="PRESETS", bg=SURFACE, fg=FG,
+                 font=("Segoe UI Semibold", 10)).pack(side="left")
+        self.preset_status = tk.Label(head, text="", bg=SURFACE, fg=MUTED,
+                                      font=("Segoe UI", 8))
+        self.preset_status.pack(side="right")
+
+        line = tk.Frame(preset, bg=SURFACE)
+        line.pack(fill="x", padx=14, pady=(0, 10))
+
+        self.preset_var = tk.StringVar()
+        self.preset_combo = ttk.Combobox(
+            line, textvariable=self.preset_var,
+            values=Settings.preset_names(), state="readonly")
+        self.preset_combo.pack(side="left", fill="x", expand=True)
+
+        ttk.Button(line, text="Load",
+                   command=self.load_preset).pack(side="left", padx=(6, 0))
+        ttk.Button(line, text="Save",
+                   command=self.save_preset).pack(side="left", padx=(6, 0))
+
+        preview = tk.Frame(preset, bg=SURFACE)
+        preview.pack(fill="x", padx=14, pady=(0, 11))
+        self.glow_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(preview, text="LED glow",
+                        variable=self.glow_var).pack(side="left")
+        ttk.Button(preview, text="Reset preview",
+                   command=self.reset_preview).pack(side="right")
 
     def _build_audio_monitor(self, parent):
         card = self._card(parent)
@@ -859,6 +1401,8 @@ class App:
     def on_mode(self, _=None):
         self.S.mode = self.mode_var.get()
         self.S.save()
+        if hasattr(self, "mode_cards"):
+            self._highlight_visualizer(self.S.mode)
 
     def on_palette(self, _=None):
         self.S.palette = self.pal_var.get()
@@ -912,6 +1456,11 @@ class App:
                 if active:
                     col = "#%02x%02x%02x" % (R, G, B)
                     outline = col
+                    if self.glow_var.get():
+                        # Bright LED gets a slightly brighter border to
+                        # simulate bloom without adding heavy canvas objects.
+                        edge = tuple(min(255, int(v * 1.18 + 8)) for v in (R, G, B))
+                        outline = "#%02x%02x%02x" % edge
                 else:
                     col = "#171720"
                     outline = "#272733"
@@ -957,6 +1506,41 @@ class App:
             self.preview_info.config(text=f"15 × 6  •  {self.S.mode}")
 
         self.root.after(50, self.refresh)
+
+    def save_preset(self):
+        import tkinter.simpledialog as simpledialog
+        name = simpledialog.askstring(
+            "Save preset", "Preset name:", parent=self.root)
+        if not name:
+            return
+        try:
+            if self.S.save_preset(name):
+                self.preset_var.set(name.strip())
+                self.preset_combo["values"] = Settings.preset_names()
+                self.preset_status.config(text="Saved")
+        except Exception as e:
+            self.preset_status.config(text=f"Error: {e}")
+
+    def load_preset(self):
+        name = self.preset_var.get().strip()
+        if not name:
+            return
+        try:
+            self.S.load_preset(name)
+            self.mode_var.set(self.S.mode)
+            self.pal_var.set(self.S.palette)
+            self.mirror_var.set(self.S.mirror)
+            self._highlight_visualizer(self.S.mode)
+            self.on_palette()
+            self._paint_color_buttons()
+            self.S.save()
+            self.preset_status.config(text=f"Loaded • {name}")
+        except Exception as e:
+            self.preset_status.config(text=f"Error: {e}")
+
+    def reset_preview(self):
+        self.glow_var.set(True)
+        self.preset_status.config(text="Preview reset")
 
     def on_close(self):
         self.S.save()
