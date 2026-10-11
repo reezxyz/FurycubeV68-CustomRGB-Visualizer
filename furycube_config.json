@@ -1,6 +1,6 @@
 {
- "mode": "Love - Riak beat",
- "palette": "Kustom (2 warna)",
+ "mode": "Love - Beat ripple",
+ "palette": "Custom (2 colors)",
  "c1": [
   255,
   0,
@@ -15,7 +15,7 @@
  "sens": 0.9317307692307693,
  "bright": 1.0,
  "decay": 3.2163461538461537,
- "audio": "(otomatis)",
+ "audio": "(automatic)",
  "love_bg_on": false,
  "keymap": {
   "r0k0": [

@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-FuryCube V68 - Audio Visualizer (GUI v2, berbasis layout fisik V68)
+FuryCube V68 - Audio Visualizer (GUI v2, based on the physical V68 layout)
 
-Protokol (hasil sadapan USB):
-  feature report ID 0x06, 520 byte, interface 1, usage page 0xFF00
-  header 06 08 00 00 01 00 7a 01, lalu 90 slot x 3 byte (R, G, B)
-  slot = kolom * 6 + baris  (15 kolom x 6 baris, baris 0 = atas)
+Protocol (captured from USB traffic):
+  feature report ID 0x06, 520 bytes, interface 1, usage page 0xFF00
+  header 06 08 00 00 01 00 7a 01, then 90 slots x 3 bytes (R, G, B)
+  slot = column * 6 + row  (15 columns x 6 rows, row 0 = top)
 
-Instalasi:
+Install:
   pip install hidapi numpy soundcard
-  (Linux/Arch: butuh paket 'tk', dan udev rule untuk akses device)
+  (Linux/Arch: needs the 'tk' package and a udev rule for device access)
 
-Tutup driver bawaan (OemDrv.exe) sebelum menjalankan.
+Close the stock driver (OemDrv.exe) before running.
 """
 import json
 import os
@@ -31,7 +31,7 @@ try:
 except Exception:
     sc = None
 try:
-    from PIL import Image, ImageTk          # opsional: skala PNG lebih halus
+    from PIL import Image, ImageTk          # optional: smoother PNG scaling
 except Exception:
     Image = ImageTk = None
 try:
@@ -51,25 +51,25 @@ FFT_N = 4096
 FPS = 30
 CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "furycube_config.json")
 
-# ================================================================ palet
+# ================================================================ palettes
 PALETTES = {
-    "Klasik (hijau > merah)": [(0, 255, 60), (180, 255, 0), (255, 200, 0), (255, 90, 0), (255, 0, 0)],
+    "Classic (green > red)": [(0, 255, 60), (180, 255, 0), (255, 200, 0), (255, 90, 0), (255, 0, 0)],
     "Neon": [(0, 255, 255), (120, 0, 255), (255, 0, 200)],
-    "Api": [(120, 0, 0), (255, 0, 0), (255, 140, 0), (255, 230, 100), (255, 255, 255)],
-    "Laut": [(0, 40, 120), (0, 160, 255), (0, 255, 200), (200, 255, 255)],
+    "Fire": [(120, 0, 0), (255, 0, 0), (255, 140, 0), (255, 230, 100), (255, 255, 255)],
+    "Ocean": [(0, 40, 120), (0, 160, 255), (0, 255, 200), (200, 255, 255)],
     "Sunset": [(80, 0, 160), (255, 0, 120), (255, 140, 0), (255, 230, 80)],
     "Matrix": [(0, 60, 0), (0, 255, 70), (200, 255, 200)],
-    "Cinta (pink-merah)": [(110, 0, 40), (255, 20, 90), (255, 90, 150), (255, 200, 220)],
+    "Love (pink-red)": [(110, 0, 40), (255, 20, 90), (255, 90, 150), (255, 200, 220)],
 }
-RAINBOW = "Pelangi (bergeser)"
-CUSTOM = "Kustom (2 warna)"
+RAINBOW = "Rainbow (shifting)"
+CUSTOM = "Custom (2 colors)"
 RAINBOW_STOPS = [(255, 0, 0), (255, 255, 0), (0, 255, 0), (0, 255, 255),
                  (0, 0, 255), (255, 0, 255), (255, 0, 0)]
 PALETTE_NAMES = list(PALETTES) + [RAINBOW, CUSTOM]
 
 
 class Palette:
-    """pal(x) dengan x 0..1 (skalar atau array) -> RGB 0..1 (shape x.shape + (3,))."""
+    """pal(x) with x in 0..1 (scalar or array) -> RGB 0..1 (shape x.shape + (3,))."""
 
     def __init__(self, S):
         self.S = S
@@ -90,7 +90,7 @@ class Palette:
         return np.stack([np.interp(x, pos, st[:, i]) for i in range(3)], axis=-1)
 
 
-# ================================================================ analisis audio
+# ================================================================ audio analysis
 class Analyzer:
     def __init__(self):
         freqs = np.fft.rfftfreq(FFT_N, 1.0 / RATE)
@@ -101,7 +101,7 @@ class Analyzer:
             hi = max(int(np.searchsorted(freqs, edges[i + 1])), lo + 1)
             self.slices.append((lo, hi))
         centers = np.sqrt(edges[:-1] * edges[1:])
-        self.tilt = (centers / 300.0) ** 0.5          # kompensasi nada tinggi
+        self.tilt = (centers / 300.0) ** 0.5          # compensate for weak high frequencies
         self.win = np.hanning(FFT_N)
         self.bass_lo = int(np.searchsorted(freqs, 40))
         self.bass_hi = int(np.searchsorted(freqs, 150))
@@ -144,7 +144,7 @@ class Analyzer:
 
 
 class Audio(threading.Thread):
-    """Menangkap audio sistem (loopback) ke ring buffer."""
+    """Captures system audio (loopback) into a ring buffer."""
 
     def __init__(self, S):
         super().__init__(daemon=True)
@@ -154,7 +154,7 @@ class Audio(threading.Thread):
         self.last = 0.0
         self.running = True
         self.reopen = False
-        self.status = "audio: mulai..."
+        self.status = "audio: starting..."
 
     def latest(self):
         with self.lock:
@@ -163,7 +163,7 @@ class Audio(threading.Thread):
 
     def _pick(self):
         name = self.S.audio
-        if name != "(otomatis)":
+        if name != "(automatic)":
             try:
                 return sc.get_microphone(name, include_loopback=True)
             except Exception:
@@ -179,7 +179,7 @@ class Audio(threading.Thread):
 
     def run(self):
         if sc is None:
-            self.status = "audio: library soundcard belum terpasang (pip install soundcard)"
+            self.status = "audio: soundcard library not installed (pip install soundcard)"
             return
         while self.running:
             try:
@@ -198,7 +198,7 @@ class Audio(threading.Thread):
                 time.sleep(2.0)
 
 
-# ================================================================ efek
+# ================================================================ effects
 CC, RR = np.meshgrid(np.arange(COLS), np.arange(ROWS), indexing="ij")
 
 
@@ -256,14 +256,14 @@ def fx_peak(ctx, st):
 
 def fx_butterfly(ctx, st):
     out = np.zeros((COLS, ROWS, 3))
-    order = [3, 2, 4, 1, 5, 0]          # dari tengah area tombol (baris 1-5) ke luar
+    order = [3, 2, 4, 1, 5, 0]          # from the middle of the key area (rows 1-5) outward
     for c in range(COLS):
         d = abs(c - 7)
         h = float(ctx.raw[2 * d]) * 5.0
         k = 0
         for r in order:
             if r == 0:
-                continue                 # baris 0 tidak punya tombol
+                continue                 # row 0 has no keys
             b = min(1.0, h - k)
             k += 1
             if b <= 0.03:
@@ -281,9 +281,9 @@ def fx_waterfall(ctx, st):
     if st["acc"] >= 0.07:
         st["acc"] = 0.0
         hist[:-1] = hist[1:].copy()
-        groups = np.array_split(np.arange(COLS), ROWS - 1)     # 5 baris tombol
+        groups = np.array_split(np.arange(COLS), ROWS - 1)     # 5 key rows
         col = np.array([ctx.raw[g].mean() for g in groups])    # 0 = bass
-        hist[-1, 1:] = col[::-1]                                # baris 5 (bawah) = bass
+        hist[-1, 1:] = col[::-1]                                # row 5 (bottom) = bass
         hist[-1, 0] = 0.0
     v = np.clip(hist * 1.2, 0, 1)
     return ctx.pal(v) * v[..., None]
@@ -365,17 +365,17 @@ def fx_pulse(ctx, st):
     return ctx.pal(np.clip(0.1 + dist * 0.9, 0, 1)) * inten[..., None]
 
 
-# ---------------------------------------------------------------- efek Love (area keycap khusus berbentuk hati)
+# ---------------------------------------------------------------- Love effects (heart-shaped special keycap area)
 HEART_NAMES = ["8", "9", "-", "=",
                "U", "I", "O", "P", "[", "]",
                "J", "K", "L", ";", "'",
                "M", ",", ".", "/",
-               "Alt (kanan)"]
-HEART_CX, HEART_CY = 10.5, 1.9           # pusat hati (satuan u, sama dengan layout GUI)
+               "Alt (right)"]
+HEART_CX, HEART_CY = 10.5, 1.9           # heart center (u units, same as the GUI layout)
 
 
 def _heart_cells(km):
-    """[(kolom, baris, x_u, y_u)] untuk tiap tombol area hati, dari peta tombol saat ini."""
+    """[(column, row, x_u, y_u)] for every heart-area key, from the current key map."""
     pts = []
     for name in HEART_NAMES:
         key = km.by_name.get(name)
@@ -388,7 +388,7 @@ def _heart_cells(km):
 
 
 def _heart_t(ctx):
-    """0 = ujung bawah hati, 1 = lekuk atas."""
+    """0 = bottom tip of the heart, 1 = top lobes."""
     if len(ctx.hy) == 0:
         return ctx.hy
     y0, y1 = ctx.hy.min(), ctx.hy.max()
@@ -396,7 +396,7 @@ def _heart_t(ctx):
 
 
 def _love_out(ctx, col):
-    """col: (n,3) warna tiap tombol hati. Tambahkan latar spektrum redup di luar hati (opsional)."""
+    """col: (n,3) color of each heart key. Optionally adds a dim spectrum background outside the heart."""
     out = np.zeros((COLS, ROWS, 3))
     if len(ctx.hc):
         out[ctx.hc, ctx.hr] = col
@@ -410,7 +410,7 @@ def _love_out(ctx, col):
 
 def fx_love_beat(ctx, st):
     since = st.get("since", 9.0) + ctx.dt
-    if ctx.beat or since > 1.25:           # tanpa beat tetap berdetak pelan
+    if ctx.beat or since > 1.25:           # keeps beating softly even without beats
         since = 0.0
     st["since"] = since
     e = min(1.0, np.exp(-((since - 0.06) / 0.07) ** 2) + 0.7 * np.exp(-((since - 0.30) / 0.09) ** 2))
@@ -432,14 +432,12 @@ def fx_love_fill(ctx, st):
 
 
 def fx_love_ripple(ctx, st):
+    """Rings are spawned ONLY by real beats (no idle pulse); the heart is dark when nothing is playing."""
     rings = st.setdefault("rings", [])
-    since = st.get("since", 9.0) + ctx.dt
-    if ctx.beat or since > 1.4:
+    if ctx.beat:
         rings.append([0.0, np.random.rand()])
-        since = 0.0
-    st["since"] = since
     d = np.hypot(ctx.hx - HEART_CX, ctx.hy - HEART_CY)
-    col = np.zeros((len(d), 3)) + (0.10 + 0.15 * ctx.bass) * ctx.pal(0.25)[None, :]
+    col = np.zeros((len(d), 3)) + (0.15 * ctx.bass) * ctx.pal(0.25)[None, :]
     for ring in rings:
         ring[0] += ctx.dt
         age, hue = ring
@@ -476,40 +474,40 @@ def fx_love_shimmer(ctx, st):
 
 
 MODES = [
-    ("Spektrum Klasik", fx_bars),
+    ("Classic Spectrum", fx_bars),
     ("Peak Hold", fx_peak),
-    ("Kupu-kupu (simetris)", fx_butterfly),
-    ("Air Terjun (spektrogram)", fx_waterfall),
-    ("Riak Beat", fx_ripple),
-    ("Api", fx_fire),
-    ("Hujan Neon", fx_rain),
+    ("Butterfly (symmetric)", fx_butterfly),
+    ("Waterfall (spectrogram)", fx_waterfall),
+    ("Beat Ripple", fx_ripple),
+    ("Fire", fx_fire),
+    ("Neon Rain", fx_rain),
     ("Aurora", fx_aurora),
-    ("Denyut Tengah", fx_pulse),
-    ("Love - Detak jantung", fx_love_beat),
-    ("Love - Isi (VU hati)", fx_love_fill),
-    ("Love - Riak beat", fx_love_ripple),
-    ("Love - Spektrum hati", fx_love_spectrum),
-    ("Love - Berkilau", fx_love_shimmer),
+    ("Center Pulse", fx_pulse),
+    ("Love - Heartbeat", fx_love_beat),
+    ("Love - Fill (heart VU)", fx_love_fill),
+    ("Love - Beat ripple", fx_love_ripple),
+    ("Love - Heart spectrum", fx_love_spectrum),
+    ("Love - Shimmer", fx_love_shimmer),
 ]
 LOVE_MODES = {n for n, _ in MODES if n.startswith("Love")}
 MODE_FUNCS = dict(MODES)
-TEST_ALL = "[TES] Semua LED putih"
-TEST_SWEEP = "[TES] Kalibrasi LED (sapu)"
+TEST_ALL = "[TEST] All LEDs white"
+TEST_SWEEP = "[TEST] LED calibration (sweep)"
 MODE_NAMES = [n for n, _ in MODES] + [TEST_ALL, TEST_SWEEP]
 
 
-# ================================================================ layout fisik V68 & peta slot
+# ================================================================ physical V68 layout & slot map
 class Key:
     def __init__(self, kid, label, name, x, y, w, default, kind="key"):
         self.id, self.label, self.name = kid, label, name
         self.x, self.y, self.w = x, y, w
         self.default = default
-        self.cap = max(1, len(default))      # jumlah LED maksimum (spasi = 3)
+        self.cap = max(1, len(default))      # max number of LEDs (space bar = 3)
         self.kind = kind
 
 
-# (label, lebar dalam u)  |  None = jarak kosong.  Daftar kolom = kolom matriks LED tiap tombol
-# (list di dalam list = tombol dengan beberapa LED, mis. spasi).  Baris GUI = baris fisik + 1.
+# (label, width in u)  |  None = empty gap.  Column list = LED matrix column of each key
+# (a list inside the list = key with several LEDs, e.g. the space bar).  GUI row = physical row + 1.
 _ROWS = [
     ([("Esc", 1)] + [(ch, 1) for ch in "1234567890-="] + [("Bksp", 2)],
      list(range(14))),
@@ -523,8 +521,8 @@ _ROWS = [
       ("Ctrl", 1.1), (None, 0.3), ("\u2190", 1), ("\u2193", 1), ("\u2192", 1)],
      [0, 1, 2, [3, 5, 7], 8, 9, 10, 12, 13, 14]),
 ]
-LAYOUT_W = 16.6          # lebar total dalam satuan u
-MAP_VERSION = 3          # naikkan jika peta bawaan berubah (peta tersimpan versi lama dibuang)
+LAYOUT_W = 16.6          # total width in u units
+MAP_VERSION = 3          # bump when the default map changes (saved maps from older versions are discarded)
 KNOB_ID = "knob"
 
 
@@ -542,19 +540,19 @@ def build_layout():
             x += w
             ki += 1
         assert ki == len(cols), (ri, ki, len(cols))
-    # nama unik untuk tombol kembar
+    # unique names for duplicate keys
     seen = {}
     for k in keys:
         seen.setdefault(k.label, []).append(k)
     for label, lst in seen.items():
         if len(lst) == 2:
-            lst[0].name, lst[1].name = f"{label} (kiri)", f"{label} (kanan)"
+            lst[0].name, lst[1].name = f"{label} (left)", f"{label} (right)"
     keys.append(Key(KNOB_ID, "Knob", "Knob (rotary)", 15.6, -0.15, 1.0, [], kind="knob"))
     return keys
 
 
 class Keymap:
-    """Peta tombol <-> slot LED. Slot yang tidak dimiliki tombol manapun = kosong."""
+    """Key <-> LED slot map. A slot owned by no key is empty."""
 
     def __init__(self):
         self.keys = build_layout()
@@ -615,7 +613,22 @@ class Keymap:
         self._reown()
 
 
-# ================================================================ pengaturan
+# ================================================================ settings
+# Names saved by earlier (Indonesian) versions -> current English names
+LEGACY_NAMES = {
+    "Spektrum Klasik": "Classic Spectrum", "Kupu-kupu (simetris)": "Butterfly (symmetric)",
+    "Air Terjun (spektrogram)": "Waterfall (spectrogram)", "Riak Beat": "Beat Ripple", "Api": "Fire",
+    "Hujan Neon": "Neon Rain", "Denyut Tengah": "Center Pulse",
+    "Love - Detak jantung": "Love - Heartbeat", "Love - Isi (VU hati)": "Love - Fill (heart VU)",
+    "Love - Riak beat": "Love - Beat ripple", "Love - Spektrum hati": "Love - Heart spectrum",
+    "Love - Berkilau": "Love - Shimmer",
+    "[TES] Semua LED putih": "[TEST] All LEDs white", "[TES] Kalibrasi LED (sapu)": "[TEST] LED calibration (sweep)",
+    "Klasik (hijau > merah)": "Classic (green > red)", "Laut": "Ocean", "Cinta (pink-merah)": "Love (pink-red)",
+    "Pelangi (bergeser)": "Rainbow (shifting)", "Kustom (2 warna)": "Custom (2 colors)",
+    "(otomatis)": "(automatic)",
+}
+
+
 class Settings:
     KEYS = ("mode", "palette", "c1", "c2", "mirror", "sens", "bright", "decay", "audio", "love_bg_on")
 
@@ -624,12 +637,12 @@ class Settings:
         self.palette = PALETTE_NAMES[0]
         self.c1 = (0, 255, 255)
         self.c2 = (255, 0, 200)
-        self.mirror = True          # True = bass di kanan
+        self.mirror = True          # True = bass on the right
         self.sens = 1.0
         self.bright = 1.0
         self.decay = 3.0
-        self.audio = "(otomatis)"
-        self.love_bg_on = False     # mode Love: True = sisa keyboard menampilkan spektrum redup
+        self.audio = "(automatic)"
+        self.love_bg_on = False     # Love modes: True = the rest of the keyboard shows a dim spectrum
         self.keymap = Keymap()
         self.empty = self.keymap.empty_slots()
 
@@ -646,6 +659,9 @@ class Settings:
             if k in d:
                 setattr(self, k, d[k])
         self.c1, self.c2 = tuple(self.c1), tuple(self.c2)
+        self.mode = LEGACY_NAMES.get(self.mode, self.mode)
+        self.palette = LEGACY_NAMES.get(self.palette, self.palette)
+        self.audio = LEGACY_NAMES.get(self.audio, self.audio)
         if d.get("map_version") == MAP_VERSION and isinstance(d.get("keymap"), dict):
             self.keymap.from_json(d["keymap"])
         self.refresh_empty()
@@ -665,7 +681,7 @@ class Settings:
             pass
 
 
-# ================================================================ mesin (thread render + HID)
+# ================================================================ engine (render thread + HID)
 class Engine(threading.Thread):
     def __init__(self, S, audio):
         super().__init__(daemon=True)
@@ -673,11 +689,11 @@ class Engine(threading.Thread):
         self.an = Analyzer()
         self.pal = Palette(S)
         self.dev = None
-        self.status = "keyboard: belum terhubung"
+        self.status = "keyboard: not connected"
         self.preview = np.zeros((COLS, ROWS, 3), np.uint8)
         self.states = {}
         self.running = True
-        # alat kalibrasi
+        # calibration tools
         self.test_slot = 0
         self.test_auto = False
         self.test_row = None
@@ -701,13 +717,13 @@ class Engine(threading.Thread):
 
     def connect(self):
         if hid is None:
-            self.status = "keyboard: library hidapi belum terpasang (pip install hidapi)"
+            self.status = "keyboard: hidapi library not installed (pip install hidapi)"
             return False
         blank = self.make_buf(np.zeros((COLS, ROWS, 3), np.uint8))
         try:
             devs = hid.enumerate(VID, 0)
         except Exception as e:
-            self.status = f"keyboard: error enumerate ({e})"
+            self.status = f"keyboard: enumerate error ({e})"
             return False
         for d in devs:
             if d.get("usage_page") != 0xFF00:
@@ -717,7 +733,7 @@ class Engine(threading.Thread):
                 dev.open_path(d["path"])
                 if dev.send_feature_report(blank) == 520:
                     self.dev = dev
-                    self.status = f"keyboard terhubung (PID {d['product_id']:04X})"
+                    self.status = f"keyboard connected (PID {d['product_id']:04X})"
                     return True
             except Exception:
                 pass
@@ -725,7 +741,7 @@ class Engine(threading.Thread):
                 dev.close()
             except Exception:
                 pass
-        self.status = "keyboard tidak ketemu - tutup OemDrv.exe lalu klik 'Sambung ulang'"
+        self.status = "keyboard not found - close OemDrv.exe, then click 'Reconnect'"
         return False
 
     def disconnect(self):
@@ -790,9 +806,9 @@ class Engine(threading.Thread):
                     fn = MODE_FUNCS.get(mode, fx_bars)
                     st = self.states.setdefault(mode, {})
                     frame = fn(ctx, st) * valid[..., None]
-            except Exception as e:           # satu efek error tidak boleh mematikan thread
+            except Exception as e:           # one failing effect must not kill the thread
                 frame = np.zeros((COLS, ROWS, 3))
-                self.status = f"efek error: {e}"
+                self.status = f"effect error: {e}"
             frame = np.clip(frame * S.bright, 0.0, 1.0)
             rgb = (frame * 255.0 + 0.5).astype(np.uint8)
             self.preview = rgb
@@ -800,10 +816,10 @@ class Engine(threading.Thread):
             if self.dev is not None:
                 try:
                     if self.dev.send_feature_report(self.make_buf(rgb)) != 520:
-                        raise IOError("write gagal")
+                        raise IOError("write failed")
                 except Exception:
                     self.disconnect()
-                    self.status = "keyboard: koneksi putus, mencoba menyambung ulang..."
+                    self.status = "keyboard: connection lost, trying to reconnect..."
             elif now >= next_try:
                 self.connect()
                 next_try = now + 2.0
@@ -811,10 +827,10 @@ class Engine(threading.Thread):
             time.sleep(max(0.0, 1.0 / FPS - (time.time() - now)))
 
 
-# ---------------------------------------------------------------- gambar layout (PNG)
-# Koordinat kotak warna tiap tombol pada keyimg.png asli (670 x 259 px).
-# Disimpan sebagai pixel referensi, lalu diskalakan ke ukuran gambar yang tampil,
-# jadi PNG dengan resolusi lain (rasio sama) tetap pas.
+# ---------------------------------------------------------------- layout image (PNG)
+# Color rectangle of each key on the original keyimg.png (670 x 259 px).
+# Stored as reference pixels, then scaled to the displayed image size,
+# so a PNG with another resolution (same aspect ratio) still fits.
 REF_W, REF_H = 670, 259
 PNG_NAMES = ("keyimg.png", "v68.png", "layout.png")
 PNG_KNOB = (616, 28, 652, 65)
@@ -890,7 +906,7 @@ PNG_RECTS = {
 
 
 def find_png():
-    """Cari gambar layout di folder skrip, lalu di subfolder assets/img/images."""
+    """Find the layout image in the script folder, then in the assets/img/images subfolders."""
     here = os.path.dirname(os.path.abspath(__file__))
     for folder in (here, os.path.join(here, "assets"), os.path.join(here, "img"), os.path.join(here, "images")):
         for name in PNG_NAMES:
@@ -903,8 +919,8 @@ def find_png():
 # ================================================================ GUI
 BG, CARD, FG, MUTED, ACC = "#0d0d13", "#15151e", "#e8e8f2", "#8a8a9c", "#8b5cf6"
 OFF, EDGE, WARN, HL, FIELD = "#1a1a24", "#2e2e3e", "#9a6a22", "#ffd23f", "#20202c"
-ROW_CHOICES = ["Semua baris", "Baris 0 (atas)", "Baris 1 (Esc)", "Baris 2 (Tab)",
-               "Baris 3 (Caps)", "Baris 4 (Shift)", "Baris 5 (Ctrl/Space)"]
+ROW_CHOICES = ["All rows", "Row 0 (top)", "Row 1 (Esc)", "Row 2 (Tab)",
+               "Row 3 (Caps)", "Row 4 (Shift)", "Row 5 (Ctrl/Space)"]
 
 
 def enable_dpi_awareness():
@@ -917,9 +933,9 @@ def enable_dpi_awareness():
 
 
 def style_titlebar(root, bg=BG, fg=FG, border=EDGE):
-    """Windows: warnai title bar native (dark mode + warna caption/teks/border).
-    Win11 (build 22000+) mendapat warna persis; Win10 hanya dark mode. Platform lain: tidak berbuat apa-apa.
-    Tetap native, jadi geser/snap/minimize tetap mulus."""
+    """Windows: color the native title bar (dark mode + caption/text/border colors).
+    Win11 (build 22000+) gets the exact colors; Win10 only gets dark mode. Other platforms: no-op.
+    Stays native, so dragging/snapping/minimizing remains smooth."""
     if not sys.platform.startswith("win"):
         return False
     try:
@@ -939,12 +955,12 @@ def style_titlebar(root, bg=BG, fg=FG, border=EDGE):
             return dwm.DwmSetWindowAttribute(wintypes.HWND(hwnd), ctypes.c_uint(attr),
                                              ctypes.byref(v), ctypes.sizeof(v))
 
-        if put(20, 1) != 0:                    # DWMWA_USE_IMMERSIVE_DARK_MODE (19 di Win10 lama)
+        if put(20, 1) != 0:                    # DWMWA_USE_IMMERSIVE_DARK_MODE (19 on older Win10)
             put(19, 1)
         put(35, colorref(bg))                  # DWMWA_CAPTION_COLOR (Win11)
         put(36, colorref(fg))                  # DWMWA_TEXT_COLOR    (Win11)
         put(34, colorref(border))              # DWMWA_BORDER_COLOR  (Win11)
-        # paksa non-client area digambar ulang (NOSIZE|NOMOVE|NOZORDER|FRAMECHANGED)
+        # force the non-client area to redraw (NOSIZE|NOMOVE|NOZORDER|FRAMECHANGED)
         user32.SetWindowPos(wintypes.HWND(hwnd), None, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0020)
         return True
     except Exception:
@@ -952,10 +968,10 @@ def style_titlebar(root, bg=BG, fg=FG, border=EDGE):
 
 
 def make_icon(size=32):
-    """Ikon keycap ungu kecil (digambar lewat tk.PhotoImage, tanpa file/PIL)."""
+    """Small purple keycap icon (drawn via tk.PhotoImage, no file/PIL needed)."""
     img = tk.PhotoImage(width=size, height=size)
 
-    def inside(x, y, m, rad):                  # persegi bulat dengan margin m
+    def inside(x, y, m, rad):                  # rounded square with margin m
         lo, hi = m, size - 1 - m
         if not (lo <= x <= hi and lo <= y <= hi):
             return False
@@ -982,7 +998,7 @@ class App:
         r = self.root = tk.Tk()
         r.title("FuryCube V68 Visualizer")
         r.configure(bg=BG)
-        r.resizable(False, False)          # tanpa maximize/resize = ringan
+        r.resizable(False, False)          # no maximize/resize = lightweight
 
         k = max(1.0, min(2.0, r.winfo_fpixels("1i") / 96.0))
         k = min(k, (r.winfo_screenwidth() - 60) / self.BASE_W, (r.winfo_screenheight() - 120) / self.BASE_H)
@@ -1010,7 +1026,7 @@ class App:
         hd.pack(fill="x", padx=pad, pady=(pad, 4))
         tk.Label(hd, text="FURYCUBE", bg=BG, fg=FG, font=self.f_title).pack(side="left")
         tk.Label(hd, text="  V68 · AUDIO VISUALIZER", bg=BG, fg=MUTED, font=self.f_sub).pack(side="left", pady=(int(8 * k), 0))
-        self.conn = tk.Label(hd, text="● TIDAK TERHUBUNG", bg=BG, fg="#ff6b6b", font=self.f_small)
+        self.conn = tk.Label(hd, text="● DISCONNECTED", bg=BG, fg="#ff6b6b", font=self.f_small)
         self.conn.pack(side="right")
 
         # ---- keyboard canvas
@@ -1039,7 +1055,7 @@ class App:
         body.columnconfigure(0, weight=1, uniform="c")
         body.columnconfigure(1, weight=1, uniform="c")
 
-        # ---- kartu kiri: mode & warna
+        # ---- left card: mode & colors
         left = self.card(body, 0, 0)
         self.label(left, "MODE").grid(row=0, column=0, sticky="w")
         self.mode_var = tk.StringVar(value=self.S.mode)
@@ -1047,13 +1063,13 @@ class App:
         cb.grid(row=0, column=1, sticky="ew", padx=(8, 0), pady=3)
         cb.bind("<<ComboboxSelected>>", self.on_mode)
 
-        self.label(left, "PALET").grid(row=1, column=0, sticky="w")
+        self.label(left, "PALETTE").grid(row=1, column=0, sticky="w")
         self.pal_var = tk.StringVar(value=self.S.palette)
         cb2 = ttk.Combobox(left, textvariable=self.pal_var, values=PALETTE_NAMES, state="readonly", width=28)
         cb2.grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=3)
         cb2.bind("<<ComboboxSelected>>", self.on_palette)
 
-        self.label(left, "KUSTOM").grid(row=2, column=0, sticky="w")
+        self.label(left, "CUSTOM").grid(row=2, column=0, sticky="w")
         cf = tk.Frame(left, bg=CARD)
         cf.grid(row=2, column=1, sticky="w", padx=(8, 0), pady=3)
         self.b1 = tk.Button(cf, text="A", width=6, relief="flat", bd=0, font=self.f_small,
@@ -1063,45 +1079,45 @@ class App:
         self.b1.pack(side="left", padx=(0, 6))
         self.b2.pack(side="left")
         self.mirror_var = tk.BooleanVar(value=self.S.mirror)
-        tk.Checkbutton(cf, text="Bass di kanan", variable=self.mirror_var, command=self.on_mirror,
+        tk.Checkbutton(cf, text="Bass on the right", variable=self.mirror_var, command=self.on_mirror,
                        bg=CARD, fg=FG, selectcolor=FIELD, activebackground=CARD, activeforeground=FG,
                        font=self.f_small, bd=0, highlightthickness=0).pack(side="left", padx=(14, 0))
         self.bg_var = tk.BooleanVar(value=self.S.love_bg_on)
-        tk.Checkbutton(left, text="Mode Love: tampilkan spektrum redup di luar hati", variable=self.bg_var,
+        tk.Checkbutton(left, text="Love modes: show a dim spectrum outside the heart", variable=self.bg_var,
                        command=self.on_love_bg, bg=CARD, fg=FG, selectcolor=FIELD, activebackground=CARD,
                        activeforeground=FG, font=self.f_small, bd=0, highlightthickness=0
                        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
         left.columnconfigure(1, weight=1)
         self._paint_color_buttons()
 
-        # ---- kartu kanan: slider
+        # ---- right card: sliders
         right = self.card(body, 0, 1)
         right.columnconfigure(1, weight=1)
-        self.slider(right, 0, "SENSITIVITAS", "sens", 0.3, 3.0)
-        self.slider(right, 1, "KECERAHAN", "bright", 0.05, 1.0)
-        self.slider(right, 2, "KEJATUHAN BAR", "decay", 0.5, 8.0)
+        self.slider(right, 0, "SENSITIVITY", "sens", 0.3, 3.0)
+        self.slider(right, 1, "BRIGHTNESS", "bright", 0.05, 1.0)
+        self.slider(right, 2, "BAR FALLOFF", "decay", 0.5, 8.0)
 
-        # ---- baris audio
+        # ---- audio row
         au = tk.Frame(r, bg=CARD, padx=int(12 * k), pady=int(8 * k))
         au.pack(fill="x", padx=pad, pady=4)
         au.columnconfigure(1, weight=1)
         self.label(au, "AUDIO").grid(row=0, column=0, sticky="w")
-        self.dev_map = {"(otomatis)": "(otomatis)"}
+        self.dev_map = {"(automatic)": "(automatic)"}
         try:
             for m in sc.all_microphones(include_loopback=True):
                 lab = ("[loopback] " if getattr(m, "isloopback", False) else "[mic] ") + m.name
                 self.dev_map[lab] = m.name
         except Exception:
             pass
-        cur = next((kk for kk, v in self.dev_map.items() if v == self.S.audio), "(otomatis)")
+        cur = next((kk for kk, v in self.dev_map.items() if v == self.S.audio), "(automatic)")
         self.dev_var = tk.StringVar(value=cur)
         cb3 = ttk.Combobox(au, textvariable=self.dev_var, values=list(self.dev_map), state="readonly")
         cb3.grid(row=0, column=1, sticky="ew", padx=8)
         cb3.bind("<<ComboboxSelected>>", self.on_audio)
-        self.button(au, "Sambung ulang", self.reconnect).grid(row=0, column=2, padx=(0, 6))
-        self.button(au, "Reset peta LED", self.reset_map).grid(row=0, column=3)
+        self.button(au, "Reconnect", self.reconnect).grid(row=0, column=2, padx=(0, 6))
+        self.button(au, "Reset LED map", self.reset_map).grid(row=0, column=3)
 
-        # ---- panel kalibrasi (hanya tampil di mode kalibrasi)
+        # ---- calibration panel (only shown in calibration mode)
         self.test = tk.Frame(r, bg=CARD, padx=int(12 * k), pady=int(8 * k))
         self.button(self.test, "◀", lambda: self.eng.step_slot(-1), w=3).grid(row=0, column=0)
         self.button(self.test, "▶", lambda: self.eng.step_slot(1), w=3).grid(row=0, column=1, padx=(4, 8))
@@ -1113,12 +1129,12 @@ class App:
         cb4 = ttk.Combobox(self.test, textvariable=self.row_var, values=ROW_CHOICES, state="readonly", width=20)
         cb4.grid(row=0, column=3, padx=8)
         cb4.bind("<<ComboboxSelected>>", self.on_row)
-        self.button(self.test, "Slot ini kosong", self.mark_empty).grid(row=0, column=4)
+        self.button(self.test, "This slot is empty", self.mark_empty).grid(row=0, column=4)
         self.info = tk.Label(self.test, text="", bg=CARD, fg=HL, font=self.f_small, anchor="w")
         self.info.grid(row=1, column=0, columnspan=6, sticky="w", pady=(6, 0))
         tk.Label(self.test, bg=CARD, fg=MUTED, font=self.f_small, anchor="w", justify="left",
-                 text="Satu LED putih berjalan di keyboard. Klik tombol di gambar yang MENYALA di keyboard asli "
-                      "(spasi: klik 3x untuk 3 LED-nya). Kalau tidak ada yang menyala, klik 'Slot ini kosong'."
+                 text="One white LED runs across the keyboard. Click the key in the picture that LIGHTS UP on the real keyboard "
+                      "(space bar: click 3x for its 3 LEDs). If nothing lights up, click 'This slot is empty'."
                  ).grid(row=2, column=0, columnspan=6, sticky="w")
 
         self.status = tk.StringVar()
@@ -1137,12 +1153,12 @@ class App:
         except Exception:
             pass
         style_titlebar(r)
-        r.after(120, lambda: style_titlebar(r))     # ulangi sekali setelah window tampil
+        r.after(120, lambda: style_titlebar(r))     # repeat once after the window is shown
         self.audio.start()
         self.eng.start()
         self.refresh()
 
-    # ---- helper widget
+    # ---- widget helpers
     def _style(self):
         s = ttk.Style(self.root)
         try:
@@ -1193,9 +1209,9 @@ class App:
         sc_.grid(row=row, column=1, sticky="ew", padx=8)
         sc_.bind("<ButtonRelease-1>", lambda e: self.S.save())
 
-    # ---- gambar keyboard
+    # ---- keyboard drawing
     def _load_png(self, path, target_w):
-        """Muat PNG dan skalakan ke lebar target. Pillow bila ada, kalau tidak zoom/subsample bawaan Tk."""
+        """Load the PNG and scale it to the target width. Uses Pillow if available, otherwise Tk zoom/subsample."""
         try:
             if Image is not None and ImageTk is not None:
                 im = Image.open(path).convert("RGBA")
@@ -1212,11 +1228,11 @@ class App:
                 img = img0 if (z, mm) == (1, 1) else img0.zoom(z, z).subsample(mm, mm)
                 w, h = img.width(), img.height()
             if abs(ow / oh - REF_W / REF_H) > 0.05 * REF_W / REF_H:
-                self.png_note = f"PNG {ow}x{oh} rasionya beda dari layout V68, pakai gambar bawaan"
+                self.png_note = f"PNG {ow}x{oh} has a different aspect ratio than the V68 layout, using the built-in drawing"
                 return None
             return {"img": img, "w": w, "h": h, "path": path}
         except Exception as e:
-            self.png_note = f"gagal memuat PNG ({e}), pakai gambar bawaan"
+            self.png_note = f"failed to load PNG ({e}), using the built-in drawing"
             return None
 
     def rebuild_keys(self):
@@ -1226,7 +1242,7 @@ class App:
             self._build_drawn_keys()
 
     def _build_png_keys(self):
-        """Warna LED digambar DI BELAKANG PNG, jadi garis dan huruf PNG tetap tampil di atas warna."""
+        """LED colors are drawn BEHIND the PNG, so its outlines and legends stay on top of the colors."""
         c = self.canvas
         c.delete("all")
         self.segs, self.key_boxes, self.last = [], [], {}
@@ -1246,7 +1262,7 @@ class App:
                 if slots:
                     self.segs.append((it, slots[0][0], slots[0][1], None))
                 continue
-            n = max(1, len(slots))                  # spasi = 3 segmen
+            n = max(1, len(slots))                  # space bar = 3 segments
             for i in range(n):
                 sx0 = x0 + (x1 - x0) * i / n + (1 if i else 0)
                 sx1 = x0 + (x1 - x0) * (i + 1) / n - (1 if i < n - 1 else 0)
@@ -1254,7 +1270,7 @@ class App:
                 if slots:
                     self.segs.append((it, slots[i][0], slots[i][1], None))
         c.create_image(m, m, image=self.png["img"], anchor="nw")
-        for key, x0, y0, x1, y1 in self.key_boxes:      # tombol tanpa slot LED
+        for key, x0, y0, x1, y1 in self.key_boxes:      # keys without an LED slot
             if key.kind != "knob" and not km.slots[key.id]:
                 c.create_rectangle(x0, y0, x1, y1, outline=WARN, dash=(3, 3), width=max(1, int(k)))
         self.hl = c.create_rectangle(0, 0, 0, 0, outline=HL, width=max(2, int(2.5 * k)), state="hidden")
@@ -1292,7 +1308,7 @@ class App:
                     self.segs.append((it, slots[i][0], slots[i][1], None))
             lab = c.create_text(cx, cy, text=key.label, fill="#9a9ab0",
                                 font=self.f_key if len(key.label) <= 2 else self.f_small)
-            if n == 1 and slots:                        # label ikut kontras pada tombol 1 LED
+            if n == 1 and slots:                        # label follows contrast on 1-LED keys
                 it, cc, rr, _ = self.segs[-1]
                 self.segs[-1] = (it, cc, rr, lab)
         self.hl = c.create_rectangle(0, 0, 0, 0, outline=HL, width=max(2, int(2.5 * k)), state="hidden")
@@ -1340,7 +1356,7 @@ class App:
             if key.id == kid:
                 slots = self.S.keymap.slots[kid]
                 slot = (i // ROWS, i % ROWS)
-                if len(slots) > 1 and slot in slots:        # tombol multi-LED (spasi): tandai segmennya saja
+                if len(slots) > 1 and slot in slots:        # multi-LED key (space bar): highlight only its segment
                     n, j = len(slots), slots.index(slot)
                     w = (x1 - x0) / n
                     x0, x1 = x0 + w * j, x0 + w * (j + 1)
@@ -1351,22 +1367,22 @@ class App:
 
     def _update_status(self):
         ok = self.eng.dev is not None
-        self.conn.config(text="● TERHUBUNG" if ok else "● TIDAK TERHUBUNG", fg="#4ade80" if ok else "#ff6b6b")
+        self.conn.config(text="● CONNECTED" if ok else "● DISCONNECTED", fg="#4ade80" if ok else "#ff6b6b")
         used = N_LED - len(self.S.empty)
-        src = "gambar: PNG" if self.png else ("gambar: bawaan" + (f" ({self.png_note})" if self.png_note else ""))
-        self.status.set(f"{self.eng.status}   |   {self.audio.status}   |   LED terpakai {used}/{N_LED}, kosong {len(self.S.empty)}   |   {src}")
+        src = "image: PNG" if self.png else ("image: built-in" + (f" ({self.png_note})" if self.png_note else ""))
+        self.status.set(f"{self.eng.status}   |   {self.audio.status}   |   LEDs used {used}/{N_LED}, empty {len(self.S.empty)}   |   {src}")
         if self.S.mode == TEST_SWEEP:
             i = self.eng.test_slot
             c, r = i // ROWS, i % ROWS
             kid = self.S.keymap.owner.get((c, r))
-            who = f"tombol \u00ab{self.S.keymap.by_id[kid].name}\u00bb" if kid else "KOSONG (tidak ada tombol)"
-            self.info.config(text=f"Slot {i}  \u00b7  kolom {c}, baris {r}  \u2192  {who}")
+            who = f"key \u00ab{self.S.keymap.by_id[kid].name}\u00bb" if kid else "EMPTY (no key)"
+            self.info.config(text=f"Slot {i}  \u00b7  column {c}, row {r}  \u2192  {who}")
 
     def _on_configure(self, e):
         if e.widget is self.root:
             self._quiet_until = time.time() + 0.25
 
-    # ---- event
+    # ---- events
     def _apply_mode_panel(self):
         if self.S.mode == TEST_SWEEP:
             self.test.pack(fill="x", padx=int(14 * self.k), pady=4, before=self.status_widget())
@@ -1400,7 +1416,7 @@ class App:
         self.S.save()
 
     def on_audio(self, _=None):
-        self.S.audio = self.dev_map.get(self.dev_var.get(), "(otomatis)")
+        self.S.audio = self.dev_map.get(self.dev_var.get(), "(automatic)")
         self.audio.reopen = True
         self.S.save()
 
@@ -1430,9 +1446,9 @@ class App:
 
     def reconnect(self):
         self.eng.disconnect()
-        self.eng.status = "keyboard: menyambung ulang..."
+        self.eng.status = "keyboard: reconnecting..."
 
-    # ---- kalibrasi
+    # ---- calibration
     def _map_changed(self):
         self.S.refresh_empty()
         self.S.save()
@@ -1466,7 +1482,7 @@ class App:
         self.eng.step_slot(1)
 
     def reset_map(self):
-        if messagebox.askyesno("Reset peta LED", "Kembalikan peta tombol ke bawaan layout V68?", parent=self.root):
+        if messagebox.askyesno("Reset LED map", "Restore the key map to the V68 layout defaults?", parent=self.root):
             self.S.keymap.reset()
             self._map_changed()
 
@@ -1482,5 +1498,5 @@ class App:
 
 if __name__ == "__main__":
     if tk is None:
-        sys.exit("tkinter tidak tersedia (Arch: sudo pacman -S tk)")
+        sys.exit("tkinter is not available (Arch: sudo pacman -S tk)")
     App().run()
