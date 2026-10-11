@@ -1,5 +1,5 @@
 {
- "mode": "[TES] Kalibrasi LED (sapu)",
+ "mode": "Love - Riak beat",
  "palette": "Kustom (2 warna)",
  "c1": [
   255,
@@ -16,6 +16,7 @@
  "bright": 1.0,
  "decay": 3.2163461538461537,
  "audio": "(otomatis)",
+ "love_bg": false,
  "keymap": {
   "r0k0": [
    [

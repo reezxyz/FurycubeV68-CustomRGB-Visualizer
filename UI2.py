@@ -55,6 +55,7 @@ PALETTES = {
     "Laut": [(0, 40, 120), (0, 160, 255), (0, 255, 200), (200, 255, 255)],
     "Sunset": [(80, 0, 160), (255, 0, 120), (255, 140, 0), (255, 230, 80)],
     "Matrix": [(0, 60, 0), (0, 255, 70), (200, 255, 200)],
+    "Cinta (pink-merah)": [(110, 0, 40), (255, 20, 90), (255, 90, 150), (255, 200, 220)],
 }
 RAINBOW = "Pelangi (bergeser)"
 CUSTOM = "Kustom (2 warna)"
@@ -360,6 +361,116 @@ def fx_pulse(ctx, st):
     return ctx.pal(np.clip(0.1 + dist * 0.9, 0, 1)) * inten[..., None]
 
 
+# ---------------------------------------------------------------- efek Love (area keycap khusus berbentuk hati)
+HEART_NAMES = ["8", "9", "-", "=",
+               "U", "I", "O", "P", "[", "]",
+               "J", "K", "L", ";", "'",
+               "M", ",", ".", "/",
+               "Alt (kanan)"]
+HEART_CX, HEART_CY = 10.5, 1.9           # pusat hati (satuan u, sama dengan layout GUI)
+
+
+def _heart_cells(km):
+    """[(kolom, baris, x_u, y_u)] untuk tiap tombol area hati, dari peta tombol saat ini."""
+    pts = []
+    for name in HEART_NAMES:
+        key = km.by_name.get(name)
+        if key is None:
+            continue
+        sl = km.slots.get(key.id) or []
+        if sl:
+            pts.append((sl[0][0], sl[0][1], key.x + key.w / 2.0, key.y + 0.5))
+    return pts
+
+
+def _heart_t(ctx):
+    """0 = ujung bawah hati, 1 = lekuk atas."""
+    if len(ctx.hy) == 0:
+        return ctx.hy
+    y0, y1 = ctx.hy.min(), ctx.hy.max()
+    return (y1 - ctx.hy) / max(y1 - y0, 1e-6)
+
+
+def _love_out(ctx, col):
+    """col: (n,3) warna tiap tombol hati. Tambahkan latar spektrum redup di luar hati (opsional)."""
+    out = np.zeros((COLS, ROWS, 3))
+    if len(ctx.hc):
+        out[ctx.hc, ctx.hr] = col
+    if ctx.love_bg:
+        bg = _bars(ctx, ctx.bands, 0.30)
+        if len(ctx.hc):
+            bg[ctx.hc, ctx.hr] = 0.0
+        out = out + bg
+    return out
+
+
+def fx_love_beat(ctx, st):
+    since = st.get("since", 9.0) + ctx.dt
+    if ctx.beat or since > 1.25:           # tanpa beat tetap berdetak pelan
+        since = 0.0
+    st["since"] = since
+    e = min(1.0, np.exp(-((since - 0.06) / 0.07) ** 2) + 0.7 * np.exp(-((since - 0.30) / 0.09) ** 2))
+    amp = (0.22 + 0.78 * e) * (0.75 + 0.25 * ctx.vol)
+    d = np.hypot(ctx.hx - HEART_CX, ctx.hy - HEART_CY) / 3.2
+    val = amp * np.clip(1.0 - 0.4 * d, 0, 1)
+    col = ctx.pal(np.clip(0.2 + 0.7 * e - 0.15 * d, 0, 1)) * val[:, None]
+    return _love_out(ctx, col)
+
+
+def fx_love_fill(ctx, st):
+    lvl = float(np.clip(0.55 * ctx.vol + 0.65 * ctx.bass, 0, 1))
+    cur = max(lvl, st.get("lvl", 0.0) - 1.3 * ctx.dt)
+    st["lvl"] = cur
+    t = _heart_t(ctx)
+    b = np.clip((cur * 1.15 - t) * 5.0, 0, 1)
+    col = ctx.pal(np.clip(0.2 + 0.8 * t, 0, 1)) * (0.07 + 0.93 * b)[:, None]
+    return _love_out(ctx, col)
+
+
+def fx_love_ripple(ctx, st):
+    rings = st.setdefault("rings", [])
+    since = st.get("since", 9.0) + ctx.dt
+    if ctx.beat or since > 1.4:
+        rings.append([0.0, np.random.rand()])
+        since = 0.0
+    st["since"] = since
+    d = np.hypot(ctx.hx - HEART_CX, ctx.hy - HEART_CY)
+    col = np.zeros((len(d), 3)) + (0.10 + 0.15 * ctx.bass) * ctx.pal(0.25)[None, :]
+    for ring in rings:
+        ring[0] += ctx.dt
+        age, hue = ring
+        inten = np.exp(-age * 2.2) * np.exp(-(((d - age * 6.0) / 0.8) ** 2))
+        col += inten[:, None] * ctx.pal((hue + ctx.pal.t * 0.05) % 1.0)
+    st["rings"] = [r for r in rings if np.exp(-r[0] * 2.2) > 0.05]
+    return _love_out(ctx, np.clip(col, 0, 1))
+
+
+def fx_love_spectrum(ctx, st):
+    t = _heart_t(ctx)
+    if len(t) == 0:
+        return _love_out(ctx, np.zeros((0, 3)))
+    x0, x1 = ctx.hx.min(), ctx.hx.max()
+    u = (ctx.hx - x0) / max(x1 - x0, 1e-6)
+    lvl = np.interp(u * (COLS - 1), np.arange(COLS), ctx.bands)
+    b = np.clip((lvl * 1.4 - t) * 4.0, 0, 1)
+    col = ctx.pal(np.clip(0.2 + 0.8 * t, 0, 1)) * (0.07 + 0.93 * b)[:, None]
+    return _love_out(ctx, col)
+
+
+def fx_love_shimmer(ctx, st):
+    st["ph"] = st.get("ph", 0.0) + ctx.dt * (0.8 + 3.5 * ctx.vol)
+    ph = st["ph"]
+    v = 0.5 + 0.5 * np.sin(ctx.hx * 1.1 + ctx.hy * 0.8 - ph * 2.0)
+    w = 0.5 + 0.5 * np.sin(ctx.hx * 2.3 - ctx.hy * 1.7 + ph * 1.3)
+    flash = st.get("flash", 0.0) * np.exp(-ctx.dt * 6.0)
+    if ctx.beat:
+        flash = 1.0
+    st["flash"] = flash
+    val = np.clip(0.30 + 0.45 * w + 0.35 * flash, 0, 1)
+    col = np.clip(ctx.pal(v) * val[:, None] + 0.30 * flash, 0, 1)
+    return _love_out(ctx, col)
+
+
 MODES = [
     ("Spektrum Klasik", fx_bars),
     ("Peak Hold", fx_peak),
@@ -370,7 +481,13 @@ MODES = [
     ("Hujan Neon", fx_rain),
     ("Aurora", fx_aurora),
     ("Denyut Tengah", fx_pulse),
+    ("Love - Detak jantung", fx_love_beat),
+    ("Love - Isi (VU hati)", fx_love_fill),
+    ("Love - Riak beat", fx_love_ripple),
+    ("Love - Spektrum hati", fx_love_spectrum),
+    ("Love - Berkilau", fx_love_shimmer),
 ]
+LOVE_MODES = {n for n, _ in MODES if n.startswith("Love")}
 MODE_FUNCS = dict(MODES)
 TEST_ALL = "[TES] Semua LED putih"
 TEST_SWEEP = "[TES] Kalibrasi LED (sapu)"
@@ -438,6 +555,7 @@ class Keymap:
     def __init__(self):
         self.keys = build_layout()
         self.by_id = {k.id: k for k in self.keys}
+        self.by_name = {k.name: k for k in self.keys}
         self.reset()
 
     def reset(self):
@@ -495,7 +613,7 @@ class Keymap:
 
 # ================================================================ pengaturan
 class Settings:
-    KEYS = ("mode", "palette", "c1", "c2", "mirror", "sens", "bright", "decay", "audio")
+    KEYS = ("mode", "palette", "c1", "c2", "mirror", "sens", "bright", "decay", "audio", "love_bg")
 
     def __init__(self):
         self.mode = MODE_NAMES[0]
@@ -507,6 +625,7 @@ class Settings:
         self.bright = 1.0
         self.decay = 3.0
         self.audio = "(otomatis)"
+        self.love_bg = True         # mode Love: sisa keyboard menampilkan spektrum redup
         self.keymap = Keymap()
         self.empty = self.keymap.empty_slots()
 
@@ -648,6 +767,12 @@ class Engine(threading.Thread):
             ctx.rows_bu = [[r for r in range(ROWS - 1, -1, -1) if valid[c, r]] for c in range(COLS)]
 
             mode = S.mode
+            if mode in LOVE_MODES:
+                pts = _heart_cells(S.keymap)
+                a = np.array(pts, dtype=float).reshape(-1, 4)
+                ctx.hc, ctx.hr = a[:, 0].astype(int), a[:, 1].astype(int)
+                ctx.hx, ctx.hy = a[:, 2], a[:, 3]
+                ctx.love_bg = S.love_bg
             try:
                 if mode == TEST_ALL:
                     frame = np.ones((COLS, ROWS, 3))
@@ -787,6 +912,11 @@ class App:
         tk.Checkbutton(cf, text="Bass di kanan", variable=self.mirror_var, command=self.on_mirror,
                        bg=CARD, fg=FG, selectcolor=FIELD, activebackground=CARD, activeforeground=FG,
                        font=self.f_small, bd=0, highlightthickness=0).pack(side="left", padx=(14, 0))
+        self.bg_var = tk.BooleanVar(value=self.S.love_bg)
+        tk.Checkbutton(left, text="Mode Love: sisa keyboard tampilkan spektrum redup", variable=self.bg_var,
+                       command=self.on_love_bg, bg=CARD, fg=FG, selectcolor=FIELD, activebackground=CARD,
+                       activeforeground=FG, font=self.f_small, bd=0, highlightthickness=0
+                       ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
         left.columnconfigure(1, weight=1)
         self._paint_color_buttons()
 
@@ -1030,6 +1160,10 @@ class App:
 
     def on_mirror(self):
         self.S.mirror = bool(self.mirror_var.get())
+        self.S.save()
+
+    def on_love_bg(self):
+        self.S.love_bg = bool(self.bg_var.get())
         self.S.save()
 
     def on_audio(self, _=None):
