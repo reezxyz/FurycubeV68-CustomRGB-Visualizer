@@ -613,7 +613,7 @@ class Keymap:
 
 # ================================================================ pengaturan
 class Settings:
-    KEYS = ("mode", "palette", "c1", "c2", "mirror", "sens", "bright", "decay", "audio", "love_bg")
+    KEYS = ("mode", "palette", "c1", "c2", "mirror", "sens", "bright", "decay", "audio", "love_bg_on")
 
     def __init__(self):
         self.mode = MODE_NAMES[0]
@@ -625,7 +625,7 @@ class Settings:
         self.bright = 1.0
         self.decay = 3.0
         self.audio = "(otomatis)"
-        self.love_bg = True         # mode Love: sisa keyboard menampilkan spektrum redup
+        self.love_bg_on = False     # mode Love: True = sisa keyboard menampilkan spektrum redup
         self.keymap = Keymap()
         self.empty = self.keymap.empty_slots()
 
@@ -772,7 +772,7 @@ class Engine(threading.Thread):
                 a = np.array(pts, dtype=float).reshape(-1, 4)
                 ctx.hc, ctx.hr = a[:, 0].astype(int), a[:, 1].astype(int)
                 ctx.hx, ctx.hy = a[:, 2], a[:, 3]
-                ctx.love_bg = S.love_bg
+                ctx.love_bg = S.love_bg_on
             try:
                 if mode == TEST_ALL:
                     frame = np.ones((COLS, ROWS, 3))
@@ -821,6 +821,59 @@ def enable_dpi_awareness():
             ctypes.windll.shcore.SetProcessDpiAwareness(1)
         except Exception:
             pass
+
+
+def style_titlebar(root, bg=BG, fg=FG, border=EDGE):
+    """Windows: warnai title bar native (dark mode + warna caption/teks/border).
+    Win11 (build 22000+) mendapat warna persis; Win10 hanya dark mode. Platform lain: tidak berbuat apa-apa.
+    Tetap native, jadi geser/snap/minimize tetap mulus."""
+    if not sys.platform.startswith("win"):
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32, dwm = ctypes.windll.user32, ctypes.windll.dwmapi
+        user32.GetParent.restype = wintypes.HWND
+        user32.GetParent.argtypes = [wintypes.HWND]
+        root.update_idletasks()
+        hwnd = user32.GetParent(root.winfo_id()) or root.winfo_id()
+
+        def colorref(h):                       # COLORREF = 0x00BBGGRR
+            return int(h[1:3], 16) | (int(h[3:5], 16) << 8) | (int(h[5:7], 16) << 16)
+
+        def put(attr, value):
+            v = ctypes.c_int(value)
+            return dwm.DwmSetWindowAttribute(wintypes.HWND(hwnd), ctypes.c_uint(attr),
+                                             ctypes.byref(v), ctypes.sizeof(v))
+
+        if put(20, 1) != 0:                    # DWMWA_USE_IMMERSIVE_DARK_MODE (19 di Win10 lama)
+            put(19, 1)
+        put(35, colorref(bg))                  # DWMWA_CAPTION_COLOR (Win11)
+        put(36, colorref(fg))                  # DWMWA_TEXT_COLOR    (Win11)
+        put(34, colorref(border))              # DWMWA_BORDER_COLOR  (Win11)
+        # paksa non-client area digambar ulang (NOSIZE|NOMOVE|NOZORDER|FRAMECHANGED)
+        user32.SetWindowPos(wintypes.HWND(hwnd), None, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0020)
+        return True
+    except Exception:
+        return False
+
+
+def make_icon(size=32):
+    """Ikon keycap ungu kecil (digambar lewat tk.PhotoImage, tanpa file/PIL)."""
+    img = tk.PhotoImage(width=size, height=size)
+
+    def inside(x, y, m, rad):                  # persegi bulat dengan margin m
+        lo, hi = m, size - 1 - m
+        if not (lo <= x <= hi and lo <= y <= hi):
+            return False
+        cx = min(max(x, lo + rad), hi - rad)
+        cy = min(max(y, lo + rad), hi - rad)
+        return (x - cx) ** 2 + (y - cy) ** 2 <= rad * rad
+    for y in range(size):
+        for x in range(size):
+            if inside(x, y, 1, 7):
+                img.put("#8b5cf6" if not inside(x, y, 6, 3) else "#15151e", to=(x, y))
+    return img
 
 
 class App:
@@ -912,8 +965,8 @@ class App:
         tk.Checkbutton(cf, text="Bass di kanan", variable=self.mirror_var, command=self.on_mirror,
                        bg=CARD, fg=FG, selectcolor=FIELD, activebackground=CARD, activeforeground=FG,
                        font=self.f_small, bd=0, highlightthickness=0).pack(side="left", padx=(14, 0))
-        self.bg_var = tk.BooleanVar(value=self.S.love_bg)
-        tk.Checkbutton(left, text="Mode Love: sisa keyboard tampilkan spektrum redup", variable=self.bg_var,
+        self.bg_var = tk.BooleanVar(value=self.S.love_bg_on)
+        tk.Checkbutton(left, text="Mode Love: tampilkan spektrum redup di luar hati", variable=self.bg_var,
                        command=self.on_love_bg, bg=CARD, fg=FG, selectcolor=FIELD, activebackground=CARD,
                        activeforeground=FG, font=self.f_small, bd=0, highlightthickness=0
                        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
@@ -977,6 +1030,13 @@ class App:
         self._tick = 0
         r.bind("<Configure>", self._on_configure)
         r.protocol("WM_DELETE_WINDOW", self.on_close)
+        try:
+            self._icon = make_icon()
+            r.iconphoto(True, self._icon)
+        except Exception:
+            pass
+        style_titlebar(r)
+        r.after(120, lambda: style_titlebar(r))     # ulangi sekali setelah window tampil
         self.audio.start()
         self.eng.start()
         self.refresh()
@@ -1163,7 +1223,7 @@ class App:
         self.S.save()
 
     def on_love_bg(self):
-        self.S.love_bg = bool(self.bg_var.get())
+        self.S.love_bg_on = bool(self.bg_var.get())
         self.S.save()
 
     def on_audio(self, _=None):
