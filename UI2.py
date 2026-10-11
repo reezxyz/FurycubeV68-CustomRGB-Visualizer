@@ -31,6 +31,10 @@ try:
 except Exception:
     sc = None
 try:
+    from PIL import Image, ImageTk          # opsional: skala PNG lebih halus
+except Exception:
+    Image = ImageTk = None
+try:
     import tkinter as tk
     import tkinter.font as tkfont
     from tkinter import ttk, colorchooser, messagebox
@@ -807,6 +811,95 @@ class Engine(threading.Thread):
             time.sleep(max(0.0, 1.0 / FPS - (time.time() - now)))
 
 
+# ---------------------------------------------------------------- gambar layout (PNG)
+# Koordinat kotak warna tiap tombol pada keyimg.png asli (670 x 259 px).
+# Disimpan sebagai pixel referensi, lalu diskalakan ke ukuran gambar yang tampil,
+# jadi PNG dengan resolusi lain (rasio sama) tetap pas.
+REF_W, REF_H = 670, 259
+PNG_NAMES = ("keyimg.png", "v68.png", "layout.png")
+PNG_KNOB = (616, 28, 652, 65)
+PNG_RECTS = {
+    "r0k0": (38, 38, 71, 71),
+    "r0k1": (76, 38, 108, 71),
+    "r0k2": (113, 38, 146, 71),
+    "r0k3": (151, 38, 183, 71),
+    "r0k4": (188, 38, 221, 71),
+    "r0k5": (226, 38, 258, 71),
+    "r0k6": (263, 38, 296, 71),
+    "r0k7": (301, 38, 333, 71),
+    "r0k8": (339, 38, 371, 71),
+    "r0k9": (376, 38, 408, 71),
+    "r0k10": (414, 38, 446, 71),
+    "r0k11": (451, 38, 483, 71),
+    "r0k12": (489, 38, 521, 71),
+    "r0k13": (526, 38, 596, 71),
+    "r1k0": (38, 76, 89, 109),
+    "r1k1": (95, 76, 127, 109),
+    "r1k2": (132, 76, 164, 109),
+    "r1k3": (170, 76, 202, 109),
+    "r1k4": (207, 76, 239, 109),
+    "r1k5": (245, 76, 277, 109),
+    "r1k6": (282, 76, 314, 109),
+    "r1k7": (320, 76, 352, 109),
+    "r1k8": (357, 76, 389, 109),
+    "r1k9": (395, 76, 427, 109),
+    "r1k10": (432, 76, 464, 109),
+    "r1k11": (470, 76, 502, 109),
+    "r1k12": (507, 76, 539, 109),
+    "r1k13": (545, 76, 596, 109),
+    "r1k14": (618, 76, 650, 109),
+    "r2k0": (38, 113, 99, 146),
+    "r2k1": (104, 113, 136, 146),
+    "r2k2": (141, 113, 174, 146),
+    "r2k3": (179, 113, 211, 146),
+    "r2k4": (216, 113, 249, 146),
+    "r2k5": (254, 113, 286, 146),
+    "r2k6": (291, 113, 324, 146),
+    "r2k7": (329, 113, 361, 146),
+    "r2k8": (366, 113, 399, 146),
+    "r2k9": (404, 113, 436, 146),
+    "r2k10": (441, 113, 474, 146),
+    "r2k11": (479, 113, 511, 146),
+    "r2k12": (516, 113, 595, 146),
+    "r2k13": (617, 113, 650, 146),
+    "r3k0": (38, 151, 118, 184),
+    "r3k1": (123, 151, 155, 184),
+    "r3k2": (160, 151, 192, 184),
+    "r3k3": (198, 151, 230, 184),
+    "r3k4": (235, 151, 268, 184),
+    "r3k5": (273, 151, 305, 184),
+    "r3k6": (310, 151, 343, 184),
+    "r3k7": (348, 151, 380, 184),
+    "r3k8": (385, 151, 418, 184),
+    "r3k9": (423, 151, 455, 184),
+    "r3k10": (460, 151, 493, 184),
+    "r3k11": (498, 151, 558, 184),
+    "r3k12": (572, 159, 605, 192),
+    "r3k13": (617, 151, 650, 184),
+    "r4k0": (38, 189, 80, 221),
+    "r4k1": (86, 189, 127, 221),
+    "r4k2": (132, 189, 174, 221),
+    "r4k3": (179, 189, 409, 221),
+    "r4k4": (414, 189, 446, 221),
+    "r4k5": (451, 189, 484, 221),
+    "r4k6": (489, 189, 521, 221),
+    "r4k7": (535, 197, 567, 230),
+    "r4k8": (572, 197, 605, 230),
+    "r4k9": (610, 197, 642, 230),
+}
+
+
+def find_png():
+    """Cari gambar layout di folder skrip, lalu di subfolder assets/img/images."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for folder in (here, os.path.join(here, "assets"), os.path.join(here, "img"), os.path.join(here, "images")):
+        for name in PNG_NAMES:
+            path = os.path.join(folder, name)
+            if os.path.isfile(path):
+                return path
+    return None
+
+
 # ================================================================ GUI
 BG, CARD, FG, MUTED, ACC = "#0d0d13", "#15151e", "#e8e8f2", "#8a8a9c", "#8b5cf6"
 OFF, EDGE, WARN, HL, FIELD = "#1a1a24", "#2e2e3e", "#9a6a22", "#ffd23f", "#20202c"
@@ -877,7 +970,7 @@ def make_icon(size=32):
 
 
 class App:
-    BASE_W, BASE_H = 900, 700
+    BASE_W, BASE_H = 900, 730
 
     def __init__(self):
         enable_dpi_awareness()
@@ -923,8 +1016,16 @@ class App:
         # ---- keyboard canvas
         self.U = 50.0 * k
         self.m = 18.0 * k
-        cw = int(self.m * 2 + LAYOUT_W * self.U)
-        ch = int(self.m * 2 + 5.3 * self.U)
+        self.png_note = ""
+        path = find_png()
+        self.png = self._load_png(path, 780.0 * k) if path else None
+        if self.png:
+            self.m = 14.0 * k
+            cw = int(self.png["w"] + 2 * self.m)
+            ch = int(self.png["h"] + 2 * self.m)
+        else:
+            cw = int(self.m * 2 + LAYOUT_W * self.U)
+            ch = int(self.m * 2 + 5.3 * self.U)
         self.canvas = tk.Canvas(r, width=cw, height=ch, bg=CARD, highlightthickness=0)
         self.canvas.pack(padx=pad, pady=4)
         self.canvas.bind("<Button-1>", self.on_click)
@@ -1093,7 +1194,72 @@ class App:
         sc_.bind("<ButtonRelease-1>", lambda e: self.S.save())
 
     # ---- gambar keyboard
+    def _load_png(self, path, target_w):
+        """Muat PNG dan skalakan ke lebar target. Pillow bila ada, kalau tidak zoom/subsample bawaan Tk."""
+        try:
+            if Image is not None and ImageTk is not None:
+                im = Image.open(path).convert("RGBA")
+                ow, oh = im.size
+                ratio = target_w / ow
+                w, h = int(round(ow * ratio)), int(round(oh * ratio))
+                img = ImageTk.PhotoImage(im.resize((w, h), Image.LANCZOS))
+            else:
+                img0 = tk.PhotoImage(file=path)
+                ow, oh = img0.width(), img0.height()
+                sc_ = target_w / ow
+                z, mm = min(((z, m) for z in range(1, 7) for m in range(1, 7)),
+                            key=lambda zm: (abs(zm[0] / zm[1] - sc_), zm[0]))
+                img = img0 if (z, mm) == (1, 1) else img0.zoom(z, z).subsample(mm, mm)
+                w, h = img.width(), img.height()
+            if abs(ow / oh - REF_W / REF_H) > 0.05 * REF_W / REF_H:
+                self.png_note = f"PNG {ow}x{oh} rasionya beda dari layout V68, pakai gambar bawaan"
+                return None
+            return {"img": img, "w": w, "h": h, "path": path}
+        except Exception as e:
+            self.png_note = f"gagal memuat PNG ({e}), pakai gambar bawaan"
+            return None
+
     def rebuild_keys(self):
+        if self.png:
+            self._build_png_keys()
+        else:
+            self._build_drawn_keys()
+
+    def _build_png_keys(self):
+        """Warna LED digambar DI BELAKANG PNG, jadi garis dan huruf PNG tetap tampil di atas warna."""
+        c = self.canvas
+        c.delete("all")
+        self.segs, self.key_boxes, self.last = [], [], {}
+        m, k = self.m, self.k
+        iw, ih = self.png["w"], self.png["h"]
+        fx, fy = iw / REF_W, ih / REF_H
+        km = self.S.keymap
+        for key in km.keys:
+            r = PNG_KNOB if key.kind == "knob" else PNG_RECTS.get(key.id)
+            if r is None:
+                continue
+            x0, y0, x1, y1 = m + r[0] * fx, m + r[1] * fy, m + r[2] * fx, m + r[3] * fy
+            slots = km.slots[key.id]
+            self.key_boxes.append((key, x0, y0, x1, y1))
+            if key.kind == "knob":
+                it = c.create_oval(x0 + 3 * fx, y0 + 3 * fy, x1 - 3 * fx, y1 - 3 * fy, fill=OFF, outline="")
+                if slots:
+                    self.segs.append((it, slots[0][0], slots[0][1], None))
+                continue
+            n = max(1, len(slots))                  # spasi = 3 segmen
+            for i in range(n):
+                sx0 = x0 + (x1 - x0) * i / n + (1 if i else 0)
+                sx1 = x0 + (x1 - x0) * (i + 1) / n - (1 if i < n - 1 else 0)
+                it = c.create_rectangle(sx0, y0, sx1, y1, fill=OFF, outline="")
+                if slots:
+                    self.segs.append((it, slots[i][0], slots[i][1], None))
+        c.create_image(m, m, image=self.png["img"], anchor="nw")
+        for key, x0, y0, x1, y1 in self.key_boxes:      # tombol tanpa slot LED
+            if key.kind != "knob" and not km.slots[key.id]:
+                c.create_rectangle(x0, y0, x1, y1, outline=WARN, dash=(3, 3), width=max(1, int(k)))
+        self.hl = c.create_rectangle(0, 0, 0, 0, outline=HL, width=max(2, int(2.5 * k)), state="hidden")
+
+    def _build_drawn_keys(self):
         c = self.canvas
         c.delete("all")
         self.segs, self.key_boxes, self.last = [], [], {}
@@ -1172,6 +1338,12 @@ class App:
             return
         for key, x0, y0, x1, y1 in self.key_boxes:
             if key.id == kid:
+                slots = self.S.keymap.slots[kid]
+                slot = (i // ROWS, i % ROWS)
+                if len(slots) > 1 and slot in slots:        # tombol multi-LED (spasi): tandai segmennya saja
+                    n, j = len(slots), slots.index(slot)
+                    w = (x1 - x0) / n
+                    x0, x1 = x0 + w * j, x0 + w * (j + 1)
                 self.canvas.coords(self.hl, x0 - 1, y0 - 1, x1 + 1, y1 + 1)
                 self.canvas.itemconfig(self.hl, state="normal")
                 self.canvas.tag_raise(self.hl)
@@ -1181,7 +1353,8 @@ class App:
         ok = self.eng.dev is not None
         self.conn.config(text="● TERHUBUNG" if ok else "● TIDAK TERHUBUNG", fg="#4ade80" if ok else "#ff6b6b")
         used = N_LED - len(self.S.empty)
-        self.status.set(f"{self.eng.status}   |   {self.audio.status}   |   LED terpakai {used}/{N_LED}, kosong {len(self.S.empty)}")
+        src = "gambar: PNG" if self.png else ("gambar: bawaan" + (f" ({self.png_note})" if self.png_note else ""))
+        self.status.set(f"{self.eng.status}   |   {self.audio.status}   |   LED terpakai {used}/{N_LED}, kosong {len(self.S.empty)}   |   {src}")
         if self.S.mode == TEST_SWEEP:
             i = self.eng.test_slot
             c, r = i // ROWS, i % ROWS
